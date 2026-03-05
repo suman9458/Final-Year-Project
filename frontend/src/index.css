@@ -1,1 +1,50 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
+
+:root {
+  --app-bg: #060b19;
+  --app-bg-soft: #0d1326;
+  --app-card: rgba(18, 28, 52, 0.78);
+  --app-card-border: rgba(148, 163, 184, 0.18);
+  --app-text: #e2e8f0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Space Grotesk", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color: var(--app-text);
+  background:
+    radial-gradient(circle at 8% 0%, rgba(45, 212, 191, 0.16), transparent 28%),
+    radial-gradient(circle at 84% 14%, rgba(14, 165, 233, 0.15), transparent 30%),
+    linear-gradient(140deg, var(--app-bg) 0%, var(--app-bg-soft) 55%, #050915 100%);
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-surface {
+  background: var(--app-card);
+  border: 1px solid var(--app-card-border);
+  backdrop-filter: blur(6px);
+}
+
+.soft-in {
+  animation: softIn 380ms ease-out both;
+}
+
+@keyframes softIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
