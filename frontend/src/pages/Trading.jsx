@@ -57,7 +57,12 @@ export default function Trading() {
       </section>
       <section className="app-surface soft-in rounded-xl p-4 lg:col-span-2 lg:min-h-96">
         <h3 className="mb-2 text-sm font-semibold text-slate-300">Chart Area</h3>
-        <TradingChart pair={selectedMarket.pair} symbol={selectedMarket.symbol} />
+        <TradingChart
+          pair={selectedMarket.pair}
+          symbol={selectedMarket.symbol}
+          source={selectedMarket.source}
+          seedPrice={selectedMarket.price}
+        />
       </section>
       <section>
         <OrderPanel symbol={selectedMarket.symbol} price={selectedMarket.price} onPlaceOrder={placeOrder} />

@@ -3,44 +3,108 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 const TradingContext = createContext(null)
 
 const initialMarkets = [
-  { symbol: "BTC / USDT", pair: "BTCUSDT", price: 50000 },
-  { symbol: "ETH / USDT", pair: "ETHUSDT", price: 3200 },
-  { symbol: "SOL / USDT", pair: "SOLUSDT", price: 180 },
-  { symbol: "BNB / USDT", pair: "BNBUSDT", price: 620 },
+  { symbol: "BTC / USDT", pair: "BTCUSDT", price: 50000, source: "binance" },
+  { symbol: "ETH / USDT", pair: "ETHUSDT", price: 3200, source: "binance" },
+  { symbol: "SOL / USDT", pair: "SOLUSDT", price: 180, source: "binance" },
+  { symbol: "BNB / USDT", pair: "BNBUSDT", price: 620, source: "binance" },
+  { symbol: "GOLD / USDT", pair: "PAXGUSDT", price: 5000, source: "binance" },
+  { symbol: "SILVER / USD", pair: "XAGUSD_DEMO", price: 24.5, source: "demo" },
 ]
 const INITIAL_DEMO_BALANCE = 10000
+const TRADING_STORAGE_KEY = "miniTradeTradingState.v1"
 
 function formatTxnId(txnNumber) {
   return `TXN-${String(txnNumber).padStart(4, "0")}`
 }
 
+function parseTxnNumber(txnId) {
+  const match = String(txnId || "").match(/^TXN-(\d+)$/)
+  return match ? Number(match[1]) : NaN
+}
+
+function createInitialDepositTransaction() {
+  return {
+    id: formatTxnId(1001),
+    type: "Deposit",
+    amount: INITIAL_DEMO_BALANCE,
+    status: "Completed",
+    createdAt: new Date().toISOString(),
+    note: "Initial demo balance",
+  }
+}
+
+function readPersistedTradingState() {
+  if (typeof window === "undefined") return null
+
+  try {
+    const raw = window.localStorage.getItem(TRADING_STORAGE_KEY)
+    if (!raw) return null
+
+    const parsed = JSON.parse(raw)
+    return {
+      selectedPair: typeof parsed?.selectedPair === "string" ? parsed.selectedPair : null,
+      positions: Array.isArray(parsed?.positions) ? parsed.positions : [],
+      closedPositions: Array.isArray(parsed?.closedPositions) ? parsed.closedPositions : [],
+      demoBalance: Number.isFinite(parsed?.demoBalance) ? Number(parsed.demoBalance) : INITIAL_DEMO_BALANCE,
+      walletTransactions: Array.isArray(parsed?.walletTransactions) ? parsed.walletTransactions : [],
+    }
+  } catch {
+    return null
+  }
+}
+
+function getNextPositionId(positions, closedPositions) {
+  const ids = [...positions, ...closedPositions].map((item) => Number(item?.id)).filter((id) => Number.isFinite(id))
+  return ids.length > 0 ? Math.max(...ids) + 1 : 1
+}
+
+function getNextTransactionNumber(transactions) {
+  const numbers = transactions.map((item) => parseTxnNumber(item?.id)).filter((value) => Number.isFinite(value))
+  return numbers.length > 0 ? Math.max(...numbers) + 1 : 1002
+}
+
 export function TradingProvider({ children }) {
+  const persistedStateRef = useRef(readPersistedTradingState())
+  const persistedState = persistedStateRef.current
+
   const [markets, setMarkets] = useState(initialMarkets)
-  const [selectedPair, setSelectedPair] = useState(initialMarkets[0].pair)
+  const [selectedPair, setSelectedPair] = useState(() => persistedState?.selectedPair || initialMarkets[0].pair)
   const [marketConnectionStatus, setMarketConnectionStatus] = useState("connecting")
-  const [positions, setPositions] = useState([])
-  const [closedPositions, setClosedPositions] = useState([])
-  const [demoBalance, setDemoBalance] = useState(INITIAL_DEMO_BALANCE)
-  const [walletTransactions, setWalletTransactions] = useState([
-    {
-      id: formatTxnId(1001),
-      type: "Deposit",
-      amount: INITIAL_DEMO_BALANCE,
-      status: "Completed",
-      createdAt: new Date().toISOString(),
-      note: "Initial demo balance",
-    },
-  ])
+  const [positions, setPositions] = useState(() => persistedState?.positions || [])
+  const [closedPositions, setClosedPositions] = useState(() => persistedState?.closedPositions || [])
+  const [demoBalance, setDemoBalance] = useState(() => persistedState?.demoBalance ?? INITIAL_DEMO_BALANCE)
+  const [walletTransactions, setWalletTransactions] = useState(() => {
+    if (persistedState?.walletTransactions && persistedState.walletTransactions.length > 0) {
+      return persistedState.walletTransactions
+    }
+    return [createInitialDepositTransaction()]
+  })
   const reconnectTimerRef = useRef(null)
-  const nextPositionIdRef = useRef(1)
-  const nextTransactionIdRef = useRef(1002)
+  const nextPositionIdRef = useRef(getNextPositionId(persistedState?.positions || [], persistedState?.closedPositions || []))
+  const nextTransactionIdRef = useRef(getNextTransactionNumber(persistedState?.walletTransactions || []))
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const payload = {
+      selectedPair,
+      positions,
+      closedPositions,
+      demoBalance,
+      walletTransactions,
+    }
+    window.localStorage.setItem(TRADING_STORAGE_KEY, JSON.stringify(payload))
+  }, [selectedPair, positions, closedPositions, demoBalance, walletTransactions])
 
   useEffect(() => {
     let socket
     let isMounted = true
 
     const connect = () => {
-      const streams = initialMarkets.map((market) => `${market.pair.toLowerCase()}@ticker`).join("/")
+      const binancePairs = initialMarkets.filter((market) => market.source === "binance").map((market) => market.pair)
+      const streams = binancePairs.map((pair) => `${pair.toLowerCase()}@ticker`).join("/")
+      if (!streams) return
+
       socket = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`)
 
       socket.onopen = () => {
@@ -76,6 +140,25 @@ export function TradingProvider({ children }) {
         socket.close()
       }
     }
+  }, [])
+
+  useEffect(() => {
+    const demoPairs = initialMarkets.filter((market) => market.source === "demo").map((market) => market.pair)
+    if (demoPairs.length === 0) return undefined
+
+    const timer = setInterval(() => {
+      setMarkets((prev) =>
+        prev.map((market) => {
+          if (!demoPairs.includes(market.pair)) return market
+
+          const drift = (Math.random() - 0.5) * 0.05
+          const nextPrice = Math.max(0.01, market.price + drift)
+          return { ...market, price: Number(nextPrice.toFixed(4)) }
+        })
+      )
+    }, 2000)
+
+    return () => clearInterval(timer)
   }, [])
 
   const selectedMarket = useMemo(
