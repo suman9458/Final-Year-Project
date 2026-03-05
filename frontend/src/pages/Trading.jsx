@@ -17,11 +17,13 @@ export default function Trading() {
     positions,
     placeOrder,
     closePosition,
+    updatePositionRisk,
     getCurrentPrice,
     calculateRunningPnl,
   } = useTrading()
 
   const isLive = marketConnectionStatus === "connected"
+  const selectedSymbolPositions = positions.filter((position) => position.symbol === selectedMarket.symbol)
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
@@ -62,6 +64,9 @@ export default function Trading() {
           symbol={selectedMarket.symbol}
           source={selectedMarket.source}
           seedPrice={selectedMarket.price}
+          currentPrice={selectedMarket.price}
+          positions={selectedSymbolPositions}
+          onUpdatePositionRisk={updatePositionRisk}
         />
       </section>
       <section>

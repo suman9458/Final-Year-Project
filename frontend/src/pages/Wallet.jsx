@@ -2,7 +2,8 @@ import { useState } from "react"
 import { useTrading } from "../context/TradingContext"
 
 export default function Wallet() {
-  const { demoBalance, totalRunningPnl, accountEquity, walletTransactions, addDemoFunds, withdrawDemoFunds } = useTrading()
+  const { demoBalance, totalRunningPnl, accountEquity, walletTransactions, addDemoFunds, withdrawDemoFunds, resetDemoAccount } =
+    useTrading()
   const [message, setMessage] = useState("")
 
   const handleAddFunds = () => {
@@ -19,16 +20,27 @@ export default function Wallet() {
     setMessage("Withdrawn $500 demo funds.")
   }
 
+  const handleReset = () => {
+    resetDemoAccount()
+    setMessage("Demo account reset to initial $10,000.")
+  }
+
   return (
     <div className="space-y-4">
       <section className="app-surface soft-in rounded-xl p-5">
         <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Wallet</p>
-        <h1 className="mt-2 text-2xl font-bold text-white">Demo Balance</h1>
-        <p className={`mt-3 text-4xl font-bold ${demoBalance >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-          ${demoBalance.toFixed(2)}
+        <h1 className="mt-2 text-2xl font-bold text-white">Current Balance (Live)</h1>
+        <p className={`mt-3 text-4xl font-bold ${accountEquity >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+          ${accountEquity.toFixed(2)}
         </p>
         <p className="mt-1 text-sm text-slate-300">Currency: USD</p>
-        <div className="mt-4 grid gap-3 rounded-lg border border-slate-700 bg-slate-900/60 p-3 text-sm sm:grid-cols-2">
+        <div className="mt-4 grid gap-3 rounded-lg border border-slate-700 bg-slate-900/60 p-3 text-sm sm:grid-cols-3">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-400">Cash Balance (Realized)</p>
+            <p className={`mt-1 font-semibold ${demoBalance >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+              ${demoBalance.toFixed(2)}
+            </p>
+          </div>
           <div>
             <p className="text-xs uppercase tracking-wide text-slate-400">Running P&L</p>
             <p className={`mt-1 font-semibold ${totalRunningPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
@@ -45,7 +57,7 @@ export default function Wallet() {
         {message ? <p className="mt-2 text-xs text-slate-300">{message}</p> : null}
       </section>
 
-      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <button
           type="button"
           onClick={handleAddFunds}
@@ -59,6 +71,13 @@ export default function Wallet() {
           className="rounded-xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white hover:bg-rose-500"
         >
           Withdraw (Demo -$500)
+        </button>
+        <button
+          type="button"
+          onClick={handleReset}
+          className="rounded-xl bg-slate-700 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-600"
+        >
+          Reset Demo Account
         </button>
       </section>
 

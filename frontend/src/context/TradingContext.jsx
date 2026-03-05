@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { fetchTradingState, saveTradingState } from "../services/tradingService"
 
 const TradingContext = createContext(null)
 
@@ -33,6 +34,17 @@ function createInitialDepositTransaction() {
   }
 }
 
+function normalizeTradingState(rawState) {
+  const parsed = rawState && typeof rawState === "object" ? rawState : {}
+  return {
+    selectedPair: typeof parsed?.selectedPair === "string" ? parsed.selectedPair : null,
+    positions: Array.isArray(parsed?.positions) ? parsed.positions : [],
+    closedPositions: Array.isArray(parsed?.closedPositions) ? parsed.closedPositions : [],
+    demoBalance: Number.isFinite(parsed?.demoBalance) ? Number(parsed.demoBalance) : INITIAL_DEMO_BALANCE,
+    walletTransactions: Array.isArray(parsed?.walletTransactions) ? parsed.walletTransactions : [],
+  }
+}
+
 function readPersistedTradingState() {
   if (typeof window === "undefined") return null
 
@@ -40,14 +52,7 @@ function readPersistedTradingState() {
     const raw = window.localStorage.getItem(TRADING_STORAGE_KEY)
     if (!raw) return null
 
-    const parsed = JSON.parse(raw)
-    return {
-      selectedPair: typeof parsed?.selectedPair === "string" ? parsed.selectedPair : null,
-      positions: Array.isArray(parsed?.positions) ? parsed.positions : [],
-      closedPositions: Array.isArray(parsed?.closedPositions) ? parsed.closedPositions : [],
-      demoBalance: Number.isFinite(parsed?.demoBalance) ? Number(parsed.demoBalance) : INITIAL_DEMO_BALANCE,
-      walletTransactions: Array.isArray(parsed?.walletTransactions) ? parsed.walletTransactions : [],
-    }
+    return normalizeTradingState(JSON.parse(raw))
   } catch {
     return null
   }
@@ -80,8 +85,48 @@ export function TradingProvider({ children }) {
     return [createInitialDepositTransaction()]
   })
   const reconnectTimerRef = useRef(null)
+  const closingPositionIdsRef = useRef(new Set())
   const nextPositionIdRef = useRef(getNextPositionId(persistedState?.positions || [], persistedState?.closedPositions || []))
   const nextTransactionIdRef = useRef(getNextTransactionNumber(persistedState?.walletTransactions || []))
+  const remoteSyncReadyRef = useRef(false)
+  const remoteSyncTimerRef = useRef(null)
+
+  useEffect(() => {
+    let isCancelled = false
+
+    async function hydrateFromServer() {
+      try {
+        const serverState = await fetchTradingState()
+        if (isCancelled || !serverState) return
+
+        const normalized = normalizeTradingState(serverState)
+        const hasSelectedPair = initialMarkets.some((market) => market.pair === normalized.selectedPair)
+        const safeSelectedPair = hasSelectedPair ? normalized.selectedPair : initialMarkets[0].pair
+        const safeWalletTxns =
+          normalized.walletTransactions.length > 0 ? normalized.walletTransactions : [createInitialDepositTransaction()]
+
+        setSelectedPair(safeSelectedPair)
+        setPositions(normalized.positions)
+        setClosedPositions(normalized.closedPositions)
+        setDemoBalance(normalized.demoBalance)
+        setWalletTransactions(safeWalletTxns)
+        nextPositionIdRef.current = getNextPositionId(normalized.positions, normalized.closedPositions)
+        nextTransactionIdRef.current = getNextTransactionNumber(safeWalletTxns)
+      } catch {
+        // Keep local mode state when API is unavailable.
+      } finally {
+        if (!isCancelled) {
+          remoteSyncReadyRef.current = true
+        }
+      }
+    }
+
+    hydrateFromServer()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -94,6 +139,19 @@ export function TradingProvider({ children }) {
       walletTransactions,
     }
     window.localStorage.setItem(TRADING_STORAGE_KEY, JSON.stringify(payload))
+
+    if (!remoteSyncReadyRef.current) return
+    if (remoteSyncTimerRef.current) clearTimeout(remoteSyncTimerRef.current)
+
+    remoteSyncTimerRef.current = setTimeout(() => {
+      saveTradingState(payload).catch(() => {
+        // Ignore sync failures and keep local mode working.
+      })
+    }, 700)
+
+    return () => {
+      if (remoteSyncTimerRef.current) clearTimeout(remoteSyncTimerRef.current)
+    }
   }, [selectedPair, positions, closedPositions, demoBalance, walletTransactions])
 
   useEffect(() => {
@@ -215,9 +273,15 @@ export function TradingProvider({ children }) {
 
   const closePosition = useCallback(
     (positionId, options = {}) => {
+      if (closingPositionIdsRef.current.has(positionId)) return
+      closingPositionIdsRef.current.add(positionId)
+
       setPositions((prev) => {
         const positionToClose = prev.find((position) => position.id === positionId)
-        if (!positionToClose) return prev
+        if (!positionToClose) {
+          closingPositionIdsRef.current.delete(positionId)
+          return prev
+        }
 
         const closeReason = options.reason || "Manual Close"
         const overrideClosePrice = Number(options.closePrice)
@@ -255,12 +319,73 @@ export function TradingProvider({ children }) {
             ...txnPrev,
           ]
         })
+        closingPositionIdsRef.current.delete(positionId)
 
         return prev.filter((position) => position.id !== positionId)
       })
     },
     [getCurrentPrice]
   )
+
+  const updatePositionRisk = useCallback((positionId, payload) => {
+    const parseLevel = (value) => {
+      if (value === null || value === undefined || value === "") return null
+      const numeric = Number(value)
+      return Number.isFinite(numeric) && numeric > 0 ? numeric : NaN
+    }
+
+    let result = { ok: false, error: "Position not found." }
+
+    setPositions((prev) => {
+      const position = prev.find((item) => item.id === positionId)
+      if (!position) return prev
+
+      const stopLoss = parseLevel(payload?.stopLoss)
+      const takeProfit = parseLevel(payload?.takeProfit)
+
+      if (Number.isNaN(stopLoss)) {
+        result = { ok: false, error: "Stop Loss must be a valid positive value." }
+        return prev
+      }
+      if (Number.isNaN(takeProfit)) {
+        result = { ok: false, error: "Take Profit must be a valid positive value." }
+        return prev
+      }
+
+      if (position.type === "BUY") {
+        if (stopLoss !== null && stopLoss >= position.entryPrice) {
+          result = { ok: false, error: "For BUY, Stop Loss must be below entry price." }
+          return prev
+        }
+        if (takeProfit !== null && takeProfit <= position.entryPrice) {
+          result = { ok: false, error: "For BUY, Take Profit must be above entry price." }
+          return prev
+        }
+      } else {
+        if (stopLoss !== null && stopLoss <= position.entryPrice) {
+          result = { ok: false, error: "For SELL, Stop Loss must be above entry price." }
+          return prev
+        }
+        if (takeProfit !== null && takeProfit >= position.entryPrice) {
+          result = { ok: false, error: "For SELL, Take Profit must be below entry price." }
+          return prev
+        }
+      }
+
+      result = { ok: true, error: null }
+      return prev.map((item) =>
+        item.id === positionId
+          ? {
+              ...item,
+              stopLoss,
+              takeProfit,
+            }
+          : item
+      )
+    })
+
+    return result
+  }, [])
 
   useEffect(() => {
     if (positions.length === 0) return
@@ -356,6 +481,16 @@ export function TradingProvider({ children }) {
     return true
   }, [])
 
+  const resetDemoAccount = useCallback(() => {
+    closingPositionIdsRef.current.clear()
+    nextPositionIdRef.current = 1
+    nextTransactionIdRef.current = 1002
+    setPositions([])
+    setClosedPositions([])
+    setDemoBalance(INITIAL_DEMO_BALANCE)
+    setWalletTransactions([createInitialDepositTransaction()])
+  }, [])
+
   const value = useMemo(
     () => ({
       markets,
@@ -370,8 +505,10 @@ export function TradingProvider({ children }) {
       closedPositions,
       placeOrder,
       closePosition,
+      updatePositionRisk,
       addDemoFunds,
       withdrawDemoFunds,
+      resetDemoAccount,
       getCurrentPrice,
       calculateRunningPnl,
     }),
@@ -390,8 +527,10 @@ export function TradingProvider({ children }) {
       selectedMarket,
       setSelectedMarket,
       totalRunningPnl,
+      updatePositionRisk,
       walletTransactions,
       withdrawDemoFunds,
+      resetDemoAccount,
     ]
   )
 

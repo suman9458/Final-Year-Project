@@ -23,8 +23,8 @@ export default function Sidebar({ isOpen, onClose }) {
       >
         <div className="mb-6 flex items-start justify-between">
           <div>
-            <h1 className="mb-1 text-xl font-bold">MiniTrade</h1>
-            <p className="text-xs text-slate-400">Demo Broker Terminal</p>
+            <h1 className="mb-1 text-xl font-bold">TradeOne</h1>
+            <p className="text-xs text-slate-400">Paper Trading Terminal</p>
           </div>
           <button
             type="button"

@@ -36,7 +36,7 @@ export default function Login() {
       <div className="pointer-events-none absolute bottom-16 right-10 h-36 w-36 rounded-full bg-sky-500/20 blur-3xl" />
       <form onSubmit={handleSubmit} className="app-surface soft-in w-full max-w-md rounded-xl p-6">
         <h1 className="mb-1 text-2xl font-bold text-white">Welcome Back</h1>
-        <p className="mb-6 text-sm text-slate-400">Login to your MiniTrade account</p>
+        <p className="mb-6 text-sm text-slate-400">Login to your TradeOne account</p>
 
         <div className="mb-4">
           <label className="mb-1 block text-sm text-slate-300" htmlFor="email">

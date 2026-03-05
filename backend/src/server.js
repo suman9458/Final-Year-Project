@@ -3,6 +3,7 @@ require("dotenv").config()
 const express = require("express")
 const cors = require("cors")
 const authRoutes = require("./routes/authRoutes")
+const tradingRoutes = require("./routes/tradingRoutes")
 const pool = require("./db/pool")
 const { errorHandler } = require("./services/errorHandler")
 
@@ -25,6 +26,7 @@ app.get("/api/health", (req, res) => {
 })
 
 app.use("/api/auth", authRoutes)
+app.use("/api/trading", tradingRoutes)
 
 app.use((req, res) => {
   res.status(404).json({ error: "Route not found" })

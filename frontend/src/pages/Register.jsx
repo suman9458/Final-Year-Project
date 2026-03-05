@@ -125,7 +125,7 @@ export default function Register() {
       <div className="pointer-events-none absolute left-10 top-10 h-28 w-28 rounded-full bg-cyan-500/20 blur-2xl" />
       <div className="pointer-events-none absolute bottom-16 right-10 h-36 w-36 rounded-full bg-sky-500/20 blur-3xl" />
       <form onSubmit={handleSubmit} className="app-surface soft-in w-full max-w-lg rounded-xl p-6">
-        <h1 className="mb-1 text-2xl font-bold text-white">Create Account</h1>
+        <h1 className="mb-1 text-2xl font-bold text-white">Create TradeOne Account</h1>
         <p className="mb-6 text-sm text-slate-400">Complete profile details and verify phone with OTP</p>
 
         <div className="mb-4">
