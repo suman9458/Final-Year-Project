@@ -6,6 +6,7 @@ const authRoutes = require("./routes/authRoutes")
 const tradingRoutes = require("./routes/tradingRoutes")
 const pool = require("./db/pool")
 const { errorHandler } = require("./services/errorHandler")
+const { ensureAdminUserExists } = require("./services/authService")
 const {
   corsOriginDelegate,
   requestIdMiddleware,
@@ -56,6 +57,8 @@ async function startServer() {
   try {
     await pool.query("SELECT 1")
     console.log("PostgreSQL connection established.")
+    await ensureAdminUserExists()
+    console.log("Admin account bootstrap checked.")
   } catch (error) {
     console.error("PostgreSQL connection failed:", error.message)
     process.exit(1)

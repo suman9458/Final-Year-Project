@@ -17,8 +17,8 @@ async function findUserById(id) {
 
 async function createUser(payload) {
   const query = `
-    INSERT INTO users (id, name, email, password_hash, country, proof_of_address, phone, phone_verified_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    INSERT INTO users (id, name, email, password_hash, country, proof_of_address, phone, phone_verified_at, role)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     RETURNING *;
   `
   const values = [
@@ -30,6 +30,7 @@ async function createUser(payload) {
     payload.proofOfAddress,
     payload.phone,
     payload.phoneVerifiedAt,
+    payload.role || "user",
   ]
   const result = await pool.query(query, values)
   return result.rows[0]
@@ -78,6 +79,18 @@ async function incrementUserTokenVersionById(id) {
   return result.rows[0] ?? null
 }
 
+async function updateUserRoleById(payload) {
+  const query = `
+    UPDATE users
+    SET role = $2, updated_at = NOW()
+    WHERE id = $1
+    RETURNING *;
+  `
+  const values = [payload.id, payload.role]
+  const result = await pool.query(query, values)
+  return result.rows[0] ?? null
+}
+
 module.exports = {
   findUserByEmail,
   findUserByPhone,
@@ -86,4 +99,5 @@ module.exports = {
   updateUserProfileById,
   updateUserPasswordById,
   incrementUserTokenVersionById,
+  updateUserRoleById,
 }

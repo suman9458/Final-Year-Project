@@ -20,6 +20,7 @@ const {
   findUserByEmail,
   findUserById,
   findUserByPhone,
+  updateUserRoleById,
   updateUserProfileById,
   updateUserPasswordById,
   incrementUserTokenVersionById,
@@ -27,6 +28,11 @@ const {
 
 const OTP_TTL_MS = 10 * 60 * 1000
 const JWT_EXPIRES_IN = "7d"
+const DEFAULT_ADMIN_EMAIL = "admin123@gmail.com"
+const DEFAULT_ADMIN_PASSWORD = "Skumar9458@"
+const DEFAULT_ADMIN_PHONE = "+911234567890"
+const DEFAULT_ADMIN_NAME = "Admin User"
+const DEFAULT_ADMIN_COUNTRY = "India"
 
 function createHttpError(status, message) {
   const error = new Error(message)
@@ -50,6 +56,7 @@ function sanitizeUser(user) {
     country: user.country,
     proofOfAddress: user.proof_of_address,
     phone: user.phone,
+    role: user.role || "user",
     phoneVerifiedAt: user.phone_verified_at,
     createdAt: user.created_at,
   }
@@ -413,6 +420,42 @@ async function revokeMySession(userId, sessionId) {
   }
 }
 
+async function ensureAdminUserExists() {
+  const email = normalizeEmail(process.env.ADMIN_EMAIL || DEFAULT_ADMIN_EMAIL)
+  const password = String(process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD)
+  const phone = normalizePhone(process.env.ADMIN_PHONE || DEFAULT_ADMIN_PHONE)
+  const name = String(process.env.ADMIN_NAME || DEFAULT_ADMIN_NAME).trim()
+  const country = String(process.env.ADMIN_COUNTRY || DEFAULT_ADMIN_COUNTRY).trim()
+
+  if (!email || !password || !phone || !name || !country) {
+    throw createHttpError(500, "Admin bootstrap credentials are invalid.")
+  }
+
+  const existing = await findUserByEmail(email)
+  if (existing) {
+    if (existing.role !== "admin") {
+      await updateUserRoleById({
+        id: existing.id,
+        role: "admin",
+      })
+    }
+    return
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10)
+  await createUser({
+    id: randomUUID(),
+    name,
+    email,
+    passwordHash,
+    country,
+    proofOfAddress: "Admin bootstrap account",
+    phone,
+    phoneVerifiedAt: new Date().toISOString(),
+    role: "admin",
+  })
+}
+
 module.exports = {
   sendPhoneOtp,
   verifyPhoneOtp,
@@ -424,4 +467,5 @@ module.exports = {
   logoutAllSessions,
   getMySessions,
   revokeMySession,
+  ensureAdminUserExists,
 }
