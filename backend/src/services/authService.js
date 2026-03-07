@@ -117,7 +117,9 @@ async function sendPhoneOtp(payload) {
     throw createHttpError(400, "Phone number is required.")
   }
   assertPhoneFormat(phone)
-  if (process.env.NODE_ENV === "production" && !isTwilioConfigured()) {
+  const isProd = process.env.NODE_ENV === "production"
+  const allowDemoOtpInProd = process.env.ALLOW_DEMO_OTP_IN_PRODUCTION === "true"
+  if (isProd && !isTwilioConfigured() && !allowDemoOtpInProd) {
     throw createHttpError(500, "Twilio is not configured on server.")
   }
 
@@ -145,9 +147,9 @@ async function sendPhoneOtp(payload) {
 
   if (smsResult.mode === "twilio") {
     response.delivery = "sms"
-  } else if (process.env.NODE_ENV !== "production") {
+  } else if (!isProd || allowDemoOtpInProd) {
     response.delivery = "demo"
-    response.note = "Twilio not configured. OTP is returned for local testing only."
+    response.note = "Twilio not configured. OTP is returned for demo/testing mode."
     response.demoOtp = otp
   }
 
