@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 
-export default function OrderPanel({ symbol, price, onPlaceOrder }) {
+export default function OrderPanel({ symbol, price, freeMargin = 0, maxRiskPerTradeAmount = 0, onPlaceOrder }) {
   const [type, setType] = useState("BUY")
   const [quantity, setQuantity] = useState("")
   const [stopLoss, setStopLoss] = useState("")
@@ -14,6 +14,15 @@ export default function OrderPanel({ symbol, price, onPlaceOrder }) {
     const move = price * qty * 0.02
     return (type === "BUY" ? move : -move).toFixed(2)
   }, [price, quantity, type])
+
+  const maxRiskAmount = useMemo(() => Math.max(0, Number(maxRiskPerTradeAmount)), [maxRiskPerTradeAmount])
+  const maxQtyByRisk = useMemo(() => {
+    const sl = Number(stopLoss)
+    if (!Number.isFinite(sl) || sl <= 0) return null
+    const riskPerUnit = Math.abs(Number(price) - sl)
+    if (!Number.isFinite(riskPerUnit) || riskPerUnit <= 0) return null
+    return maxRiskAmount / riskPerUnit
+  }, [maxRiskAmount, price, stopLoss])
 
   const handlePlaceOrder = () => {
     const qty = Number(quantity)
@@ -56,7 +65,7 @@ export default function OrderPanel({ symbol, price, onPlaceOrder }) {
       }
     }
 
-    onPlaceOrder({
+    const result = onPlaceOrder({
       symbol,
       type,
       quantity: qty,
@@ -64,6 +73,10 @@ export default function OrderPanel({ symbol, price, onPlaceOrder }) {
       stopLoss: sl,
       takeProfit: tp,
     })
+    if (result && result.ok === false) {
+      setError(result.error || "Order rejected.")
+      return
+    }
     setError("")
     setQuantity("")
     setStopLoss("")
@@ -75,6 +88,12 @@ export default function OrderPanel({ symbol, price, onPlaceOrder }) {
       <h2 className="mb-1 text-lg font-semibold">{symbol}</h2>
       <p className="mb-4 text-sm text-slate-300">
         Market Price <span className="ml-1 font-semibold text-white">${price.toLocaleString()}</span>
+      </p>
+      <p className="mb-4 text-xs text-slate-400">
+        Free Margin: <span className="font-semibold text-slate-200">${Number(freeMargin).toFixed(2)}</span>
+      </p>
+      <p className="mb-4 text-xs text-slate-500">
+        Max risk per trade (2% rule): <span className="font-semibold text-slate-300">${maxRiskAmount.toFixed(2)}</span>
       </p>
 
       <div className="mb-4 grid grid-cols-2 gap-2">
@@ -156,6 +175,9 @@ export default function OrderPanel({ symbol, price, onPlaceOrder }) {
           />
         </div>
       </div>
+      {maxQtyByRisk !== null ? (
+        <p className="mb-4 text-xs text-amber-300">Max qty by SL (2% risk): {maxQtyByRisk.toFixed(4)}</p>
+      ) : null}
 
       <div className="mb-4 flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm">
         <span className="text-slate-300">Estimated P&L</span>

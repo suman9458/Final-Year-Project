@@ -1,6 +1,7 @@
 import OrderPanel from "../components/OrderPanel"
 import TradingChart from "../components/TradingChart"
 import { useTrading } from "../context/TradingContext"
+import { useMemo } from "react"
 
 function formatPrice(value) {
   if (value >= 1000) return value.toLocaleString(undefined, { maximumFractionDigits: 2 })
@@ -18,12 +19,18 @@ export default function Trading() {
     placeOrder,
     closePosition,
     updatePositionRisk,
+    createPriceAlert,
+    freeMargin,
+    maxRiskPerTradeAmount,
     getCurrentPrice,
     calculateRunningPnl,
   } = useTrading()
 
   const isLive = marketConnectionStatus === "connected"
-  const selectedSymbolPositions = positions.filter((position) => position.symbol === selectedMarket.symbol)
+  const selectedSymbolPositions = useMemo(
+    () => positions.filter((position) => position.symbol === selectedMarket.symbol),
+    [positions, selectedMarket.symbol]
+  )
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
@@ -57,7 +64,7 @@ export default function Trading() {
           ))}
         </div>
       </section>
-      <section className="app-surface soft-in rounded-xl p-4 lg:col-span-2 lg:min-h-96">
+      <section className="app-surface soft-in min-w-0 overflow-hidden rounded-xl p-4 lg:col-span-2 lg:min-h-96">
         <h3 className="mb-2 text-sm font-semibold text-slate-300">Chart Area</h3>
         <TradingChart
           pair={selectedMarket.pair}
@@ -67,10 +74,17 @@ export default function Trading() {
           currentPrice={selectedMarket.price}
           positions={selectedSymbolPositions}
           onUpdatePositionRisk={updatePositionRisk}
+          onCreatePriceAlert={createPriceAlert}
         />
       </section>
-      <section>
-        <OrderPanel symbol={selectedMarket.symbol} price={selectedMarket.price} onPlaceOrder={placeOrder} />
+      <section className="min-w-0">
+        <OrderPanel
+          symbol={selectedMarket.symbol}
+          price={selectedMarket.price}
+          freeMargin={freeMargin}
+          maxRiskPerTradeAmount={maxRiskPerTradeAmount}
+          onPlaceOrder={placeOrder}
+        />
       </section>
       <section className="app-surface soft-in rounded-xl p-4 lg:col-span-4">
         <h3 className="mb-3 text-sm font-semibold text-slate-300">Open Positions</h3>

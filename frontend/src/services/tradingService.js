@@ -35,8 +35,15 @@ async function request(path, options = {}) {
 
   const data = await response.json()
   if (!response.ok) {
-    const error = new Error(data?.error || "Request failed.")
+    const message =
+      typeof data?.error === "string"
+        ? data.error
+        : data?.error?.message || data?.message || "Request failed."
+    const error = new Error(message)
     error.status = response.status
+    if (data?.error?.code) {
+      error.code = data.error.code
+    }
     throw error
   }
   return data

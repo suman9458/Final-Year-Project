@@ -8,7 +8,22 @@ const {
   markPhoneVerificationVerified,
   consumeVerificationToken,
 } = require("../models/phoneVerificationModel")
-const { createUser, findUserByEmail, findUserById, findUserByPhone } = require("../models/userModel")
+const {
+  createUserSession,
+  findActiveSessionByTokenId,
+  touchSessionByTokenId,
+  listUserSessionsByUserId,
+  revokeUserSessionById,
+} = require("../models/userSessionModel")
+const {
+  createUser,
+  findUserByEmail,
+  findUserById,
+  findUserByPhone,
+  updateUserProfileById,
+  updateUserPasswordById,
+  incrementUserTokenVersionById,
+} = require("../models/userModel")
 
 const OTP_TTL_MS = 10 * 60 * 1000
 const JWT_EXPIRES_IN = "7d"
@@ -63,16 +78,37 @@ function generateOtpCode() {
   return String(randomInt(100000, 999999))
 }
 
-function signToken(user) {
+function signToken(user, sessionTokenId) {
   const secret = getJwtSecret()
   return jwt.sign(
     {
       sub: user.id,
       email: user.email,
+      tv: Number(user.token_version || 0),
+      sid: sessionTokenId,
     },
     secret,
     { expiresIn: JWT_EXPIRES_IN }
   )
+}
+
+function getRequestMeta(requestMeta = {}) {
+  const ipAddress = String(requestMeta.ipAddress || "").slice(0, 64) || null
+  const userAgent = String(requestMeta.userAgent || "").slice(0, 500) || null
+  return { ipAddress, userAgent }
+}
+
+async function createSessionForUser(user, requestMeta = {}) {
+  const sessionTokenId = randomUUID()
+  const meta = getRequestMeta(requestMeta)
+  await createUserSession({
+    id: randomUUID(),
+    userId: user.id,
+    sessionTokenId,
+    userAgent: meta.userAgent,
+    ipAddress: meta.ipAddress,
+  })
+  return sessionTokenId
 }
 
 async function sendPhoneOtp(payload) {
@@ -162,7 +198,7 @@ async function verifyPhoneOtp(payload) {
   }
 }
 
-async function register(payload) {
+async function register(payload, requestMeta = {}) {
   const name = String(payload?.name || "").trim()
   const email = normalizeEmail(payload?.email)
   const password = String(payload?.password || "")
@@ -210,13 +246,14 @@ async function register(payload) {
     phoneVerifiedAt: consumedVerification.verified_at,
   })
 
+  const sessionTokenId = await createSessionForUser(user, requestMeta)
   return {
-    token: signToken(user),
+    token: signToken(user, sessionTokenId),
     user: sanitizeUser(user),
   }
 }
 
-async function login(payload) {
+async function login(payload, requestMeta = {}) {
   const email = normalizeEmail(payload?.email)
   const password = String(payload?.password || "")
 
@@ -234,8 +271,9 @@ async function login(payload) {
     throw createHttpError(401, "Invalid email or password.")
   }
 
+  const sessionTokenId = await createSessionForUser(user, requestMeta)
   return {
-    token: signToken(user),
+    token: signToken(user, sessionTokenId),
     user: sanitizeUser(user),
   }
 }
@@ -256,8 +294,121 @@ async function getProfile(token) {
   if (!user) {
     throw createHttpError(404, "User not found.")
   }
+  const userTokenVersion = Number(user.token_version || 0)
+  const tokenVersion = Number(decoded?.tv || 0)
+  if (tokenVersion !== userTokenVersion) {
+    throw createHttpError(401, "Session is no longer valid. Please login again.")
+  }
+  const sessionTokenId = String(decoded?.sid || "")
+  if (sessionTokenId) {
+    const activeSession = await findActiveSessionByTokenId(sessionTokenId)
+    if (!activeSession || activeSession.user_id !== user.id) {
+      throw createHttpError(401, "Session is no longer active. Please login again.")
+    }
+    await touchSessionByTokenId(sessionTokenId)
+  }
 
   return sanitizeUser(user)
+}
+
+async function updateProfile(userId, payload) {
+  const name = String(payload?.name || "").trim()
+  const country = String(payload?.country || "").trim()
+  const proofOfAddress = String(payload?.proofOfAddress || "").trim() || null
+
+  if (!userId) {
+    throw createHttpError(401, "Unauthorized.")
+  }
+  if (!name || !country) {
+    throw createHttpError(400, "Name and country are required.")
+  }
+
+  const updated = await updateUserProfileById({
+    id: userId,
+    name,
+    country,
+    proofOfAddress,
+  })
+
+  if (!updated) {
+    throw createHttpError(404, "User not found.")
+  }
+
+  return sanitizeUser(updated)
+}
+
+async function changePassword(userId, payload) {
+  const currentPassword = String(payload?.currentPassword || "")
+  const newPassword = String(payload?.newPassword || "")
+
+  if (!userId) {
+    throw createHttpError(401, "Unauthorized.")
+  }
+  if (!currentPassword || !newPassword) {
+    throw createHttpError(400, "Current password and new password are required.")
+  }
+
+  const user = await findUserById(userId)
+  if (!user) {
+    throw createHttpError(404, "User not found.")
+  }
+
+  const isValid = await bcrypt.compare(currentPassword, user.password_hash)
+  if (!isValid) {
+    throw createHttpError(401, "Current password is incorrect.")
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 10)
+  await updateUserPasswordById({
+    id: userId,
+    passwordHash,
+  })
+
+  return {
+    message: "Password updated successfully.",
+  }
+}
+
+async function logoutAllSessions(userId) {
+  if (!userId) {
+    throw createHttpError(401, "Unauthorized.")
+  }
+  const updated = await incrementUserTokenVersionById(userId)
+  if (!updated) {
+    throw createHttpError(404, "User not found.")
+  }
+  return {
+    message: "Logged out from all devices.",
+  }
+}
+
+async function getMySessions(userId) {
+  if (!userId) {
+    throw createHttpError(401, "Unauthorized.")
+  }
+  const sessions = await listUserSessionsByUserId(userId)
+  return sessions.map((item) => ({
+    id: item.id,
+    sessionTokenId: item.session_token_id,
+    userAgent: item.user_agent,
+    ipAddress: item.ip_address,
+    createdAt: item.created_at,
+    lastSeenAt: item.last_seen_at,
+    revokedAt: item.revoked_at,
+  }))
+}
+
+async function revokeMySession(userId, sessionId) {
+  if (!userId) {
+    throw createHttpError(401, "Unauthorized.")
+  }
+  const revoked = await revokeUserSessionById({ userId, sessionId })
+  if (!revoked) {
+    throw createHttpError(404, "Session not found.")
+  }
+  return {
+    message: "Session revoked successfully.",
+  }
 }
 
 module.exports = {
@@ -266,4 +417,9 @@ module.exports = {
   register,
   login,
   getProfile,
+  updateProfile,
+  changePassword,
+  logoutAllSessions,
+  getMySessions,
+  revokeMySession,
 }

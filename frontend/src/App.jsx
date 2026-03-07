@@ -8,6 +8,8 @@ import Dashboard from "./pages/Dashboard"
 import Trading from "./pages/Trading"
 import Wallet from "./pages/Wallet"
 import Orders from "./pages/Orders"
+import Settings from "./pages/Settings"
+import Alerts from "./pages/Alerts"
 
 export default function App() {
   return (
@@ -22,6 +24,8 @@ export default function App() {
           <Route path="/trading" element={<Trading />} />
           <Route path="/wallet" element={<Wallet />} />
           <Route path="/orders" element={<Orders />} />
+          <Route path="/alerts" element={<Alerts />} />
+          <Route path="/settings" element={<Settings />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

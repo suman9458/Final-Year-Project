@@ -35,9 +35,55 @@ async function createUser(payload) {
   return result.rows[0]
 }
 
+async function updateUserProfileById(payload) {
+  const query = `
+    UPDATE users
+    SET
+      name = $2,
+      country = $3,
+      proof_of_address = $4,
+      updated_at = NOW()
+    WHERE id = $1
+    RETURNING *;
+  `
+  const values = [payload.id, payload.name, payload.country, payload.proofOfAddress]
+  const result = await pool.query(query, values)
+  return result.rows[0] ?? null
+}
+
+async function updateUserPasswordById(payload) {
+  const query = `
+    UPDATE users
+    SET
+      password_hash = $2,
+      updated_at = NOW()
+    WHERE id = $1
+    RETURNING *;
+  `
+  const values = [payload.id, payload.passwordHash]
+  const result = await pool.query(query, values)
+  return result.rows[0] ?? null
+}
+
+async function incrementUserTokenVersionById(id) {
+  const query = `
+    UPDATE users
+    SET
+      token_version = COALESCE(token_version, 0) + 1,
+      updated_at = NOW()
+    WHERE id = $1
+    RETURNING *;
+  `
+  const result = await pool.query(query, [id])
+  return result.rows[0] ?? null
+}
+
 module.exports = {
   findUserByEmail,
   findUserByPhone,
   findUserById,
   createUser,
+  updateUserProfileById,
+  updateUserPasswordById,
+  incrementUserTokenVersionById,
 }

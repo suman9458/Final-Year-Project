@@ -1,5 +1,16 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useMemo, useState } from "react"
-import { clearSession, getSession, loginUser, registerUser } from "../services/authService"
+import {
+  changePassword as changePasswordService,
+  clearSession,
+  fetchMySessions as fetchMySessionsService,
+  getSession,
+  loginUser,
+  logoutAllSessions as logoutAllSessionsService,
+  revokeMySession as revokeMySessionService,
+  registerUser,
+  updateProfile as updateProfileService,
+} from "../services/authService"
 
 const AuthContext = createContext(null)
 
@@ -28,6 +39,17 @@ export function AuthProvider({ children }) {
     setToken(null)
   }
 
+  const updateProfile = async (payload) => {
+    const updatedUser = await updateProfileService(payload)
+    setUser(updatedUser)
+    return updatedUser
+  }
+
+  const changePassword = async (payload) => changePasswordService(payload)
+  const logoutAllSessions = async () => logoutAllSessionsService()
+  const fetchMySessions = async () => fetchMySessionsService()
+  const revokeMySession = async (sessionId) => revokeMySessionService(sessionId)
+
   const value = useMemo(
     () => ({
       user,
@@ -36,6 +58,11 @@ export function AuthProvider({ children }) {
       login,
       register,
       logout,
+      updateProfile,
+      changePassword,
+      logoutAllSessions,
+      fetchMySessions,
+      revokeMySession,
     }),
     [token, user]
   )

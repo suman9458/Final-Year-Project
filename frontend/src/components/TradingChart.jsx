@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 import { CandlestickSeries, createChart } from "lightweight-charts"
 import { useEffect, useRef, useState } from "react"
 
@@ -129,6 +130,7 @@ export default function TradingChart({
   currentPrice = 0,
   positions = [],
   onUpdatePositionRisk,
+  onCreatePriceAlert,
 }) {
   const fullscreenHostRef = useRef(null)
   const containerRef = useRef(null)
@@ -148,14 +150,13 @@ export default function TradingChart({
   const [viewportVersion, setViewportVersion] = useState(0)
   const [selectedDrawingId, setSelectedDrawingId] = useState(null)
   const [dragState, setDragState] = useState(null)
+  const [overlaySize, setOverlaySize] = useState({ width: 0, height: 0 })
+  const [overlayShapes, setOverlayShapes] = useState([])
+  const [isAlertMenuOpen, setIsAlertMenuOpen] = useState(false)
+  const [alertDirection, setAlertDirection] = useState("above")
+  const [alertTargetPrice, setAlertTargetPrice] = useState("")
+  const [alertFeedback, setAlertFeedback] = useState("")
   const drawingsScopeKey = `${pair || "unknown"}::${timeframe}`
-
-  const calculatePositionPnl = (position) => {
-    const livePrice = Number(currentPrice)
-    if (!Number.isFinite(livePrice)) return 0
-    const diff = livePrice - Number(position.entryPrice)
-    return position.type === "BUY" ? diff * Number(position.quantity) : -diff * Number(position.quantity)
-  }
 
   const buildChartPoint = (clientX, clientY) => {
     if (!containerRef.current || !chartRef.current || !candleSeriesRef.current) return null
@@ -388,9 +389,17 @@ export default function TradingChart({
         width: containerRef.current.clientWidth,
         height: containerRef.current.clientHeight || 320,
       })
+      setOverlaySize({
+        width: containerRef.current.clientWidth || 0,
+        height: containerRef.current.clientHeight || 0,
+      })
       setViewportVersion((prev) => prev + 1)
     })
     resizeObserver.observe(container)
+    setOverlaySize({
+      width: container.clientWidth || 0,
+      height: container.clientHeight || 0,
+    })
 
     const onRangeChange = () => {
       setViewportVersion((prev) => prev + 1)
@@ -552,18 +561,19 @@ export default function TradingChart({
       }
       socketRef.current = null
     }
-  }, [pair, timeframe, source])
+  }, [pair, timeframe, source, seedPrice])
 
   useEffect(() => {
     setRiskDrafts((prev) => {
       const next = {}
       positions.forEach((position) => {
+        const existing = prev[position.id]
         next[position.id] = {
-          stopLoss: position.stopLoss ?? "",
-          takeProfit: position.takeProfit ?? "",
+          stopLoss: existing ? existing.stopLoss : position.stopLoss ?? "",
+          takeProfit: existing ? existing.takeProfit : position.takeProfit ?? "",
         }
       })
-      return { ...prev, ...next }
+      return next
     })
   }, [positions])
 
@@ -759,6 +769,38 @@ export default function TradingChart({
     setDragState(null)
   }
 
+  const handleCreateAlert = () => {
+    setAlertFeedback("")
+    const targetPrice = Number(alertTargetPrice)
+    if (!Number.isFinite(targetPrice) || targetPrice <= 0) {
+      setAlertFeedback("Enter a valid target price.")
+      return
+    }
+    if (typeof onCreatePriceAlert !== "function") {
+      setAlertFeedback("Alert service unavailable.")
+      return
+    }
+
+    const result = onCreatePriceAlert({
+      pair,
+      symbol,
+      direction: alertDirection,
+      targetPrice,
+    })
+
+    if (!result?.ok) {
+      setAlertFeedback(result?.error || "Unable to create alert.")
+      return
+    }
+
+    setAlertFeedback("Alert created.")
+    setAlertTargetPrice("")
+    setTimeout(() => {
+      setIsAlertMenuOpen(false)
+      setAlertFeedback("")
+    }, 700)
+  }
+
   const getPreviewShape = () => {
     if (!pendingPoint || !previewPoint) return null
     if (activeTool !== DRAWING_TOOLS.TREND && activeTool !== DRAWING_TOOLS.RECT) return null
@@ -772,10 +814,8 @@ export default function TradingChart({
   }
 
   const renderShapes = [...drawings, ...(getPreviewShape() ? [getPreviewShape()] : [])]
-  const overlayWidth = containerRef.current?.clientWidth || 0
-  const overlayHeight = containerRef.current?.clientHeight || 0
 
-  const renderShapeNode = (shape, idx) => {
+  const projectShape = (shape, idx) => {
     const isSelected = shape.id === selectedDrawingId
     const stroke = isSelected ? "#f59e0b" : shape.isPreview ? "rgba(56,189,248,0.7)" : "#38bdf8"
     const dashed = shape.isPreview ? "6 4" : undefined
@@ -783,35 +823,33 @@ export default function TradingChart({
     if (shape.type === DRAWING_TOOLS.HLINE) {
       const y = toY(shape.price)
       if (!isFiniteNumber(y)) return null
-      return (
-        <line
-          key={shape.id || idx}
-          x1={0}
-          y1={y}
-          x2={overlayWidth}
-          y2={y}
-          stroke={stroke}
-          strokeWidth={isSelected ? "2.5" : "1.5"}
-          strokeDasharray={dashed}
-        />
-      )
+      return {
+        kind: "line",
+        key: shape.id || idx,
+        x1: 0,
+        y1: y,
+        x2: overlaySize.width,
+        y2: y,
+        stroke,
+        strokeWidth: isSelected ? "2.5" : "1.5",
+        strokeDasharray: dashed,
+      }
     }
 
     if (shape.type === DRAWING_TOOLS.VLINE) {
       const x = toX(shape.time)
       if (!isFiniteNumber(x)) return null
-      return (
-        <line
-          key={shape.id || idx}
-          x1={x}
-          y1={0}
-          x2={x}
-          y2={overlayHeight}
-          stroke={stroke}
-          strokeWidth={isSelected ? "2.5" : "1.5"}
-          strokeDasharray={dashed}
-        />
-      )
+      return {
+        kind: "line",
+        key: shape.id || idx,
+        x1: x,
+        y1: 0,
+        x2: x,
+        y2: overlaySize.height,
+        stroke,
+        strokeWidth: isSelected ? "2.5" : "1.5",
+        strokeDasharray: dashed,
+      }
     }
 
     const x1 = toX(shape.p1?.time)
@@ -821,18 +859,17 @@ export default function TradingChart({
     if (!isFiniteNumber(x1) || !isFiniteNumber(y1) || !isFiniteNumber(x2) || !isFiniteNumber(y2)) return null
 
     if (shape.type === DRAWING_TOOLS.TREND) {
-      return (
-        <line
-          key={shape.id || idx}
-          x1={x1}
-          y1={y1}
-          x2={x2}
-          y2={y2}
-          stroke={stroke}
-          strokeWidth={isSelected ? "3" : "2"}
-          strokeDasharray={dashed}
-        />
-      )
+      return {
+        kind: "line",
+        key: shape.id || idx,
+        x1,
+        y1,
+        x2,
+        y2,
+        stroke,
+        strokeWidth: isSelected ? "3" : "2",
+        strokeDasharray: dashed,
+      }
     }
 
     if (shape.type === DRAWING_TOOLS.RECT) {
@@ -840,28 +877,34 @@ export default function TradingChart({
       const y = Math.min(y1, y2)
       const width = Math.abs(x2 - x1)
       const height = Math.abs(y2 - y1)
-      return (
-        <rect
-          key={shape.id || idx}
-          x={x}
-          y={y}
-          width={width}
-          height={height}
-          fill={shape.isPreview ? "rgba(56,189,248,0.08)" : "rgba(56,189,248,0.12)"}
-          stroke={stroke}
-          strokeWidth={isSelected ? "2.5" : "1.5"}
-          strokeDasharray={dashed}
-        />
-      )
+      return {
+        kind: "rect",
+        key: shape.id || idx,
+        x,
+        y,
+        width,
+        height,
+        fill: shape.isPreview ? "rgba(56,189,248,0.08)" : "rgba(56,189,248,0.12)",
+        stroke,
+        strokeWidth: isSelected ? "2.5" : "1.5",
+        strokeDasharray: dashed,
+      }
     }
 
     return null
   }
 
+  useEffect(() => {
+    const nextShapes = renderShapes
+      .map((shape, index) => projectShape(shape, index))
+      .filter((shape) => shape !== null)
+    setOverlayShapes(nextShapes)
+  }, [renderShapes, selectedDrawingId, viewportVersion, overlaySize.width, overlaySize.height])
+
   return (
     <div
       ref={fullscreenHostRef}
-      className={`space-y-2 ${isFullscreen ? "h-full w-full bg-slate-950 p-4" : ""}`}
+      className={`min-w-0 space-y-2 ${isFullscreen ? "h-full w-full bg-slate-950 p-4" : ""}`}
     >
       <div className="flex items-center justify-between text-xs text-slate-400">
         <div className="flex items-center gap-2">
@@ -879,6 +922,50 @@ export default function TradingChart({
                 {item}
               </button>
             ))}
+          </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsAlertMenuOpen((prev) => !prev)}
+              title="Set Price Alert"
+              aria-label="Set Price Alert"
+              className="rounded-md border border-slate-700 bg-slate-900 p-1.5 text-slate-300 hover:bg-slate-800"
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4 fill-none stroke-current" strokeWidth="2">
+                <path d="M15 17H5l2-2v-4a5 5 0 1110 0v4l2 2h-4" />
+                <path d="M10 17a2 2 0 004 0" />
+              </svg>
+            </button>
+            {isAlertMenuOpen ? (
+              <div className="absolute left-0 top-9 z-20 w-56 rounded-lg border border-slate-700 bg-slate-900/95 p-2 shadow-xl">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-300">Price Alert</p>
+                <select
+                  value={alertDirection}
+                  onChange={(event) => setAlertDirection(event.target.value)}
+                  className="mb-2 w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-500"
+                >
+                  <option value="above">Price Above</option>
+                  <option value="below">Price Below</option>
+                </select>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="any"
+                  value={alertTargetPrice}
+                  onChange={(event) => setAlertTargetPrice(event.target.value)}
+                  placeholder={`Current ${formatPrice(currentPrice)}`}
+                  className="mb-2 w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-slate-100 outline-none placeholder:text-slate-400 focus:border-sky-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleCreateAlert}
+                  className="w-full rounded bg-sky-600 px-2 py-1 text-xs font-semibold text-white hover:bg-sky-500"
+                >
+                  Create Alert
+                </button>
+                {alertFeedback ? <p className="mt-1 text-[11px] text-slate-300">{alertFeedback}</p> : null}
+              </div>
+            ) : null}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -911,7 +998,7 @@ export default function TradingChart({
           </button>
         </div>
       </div>
-      <div className="flex gap-2">
+      <div className="flex min-w-0 gap-2 overflow-hidden">
         <div className="flex w-11 flex-col items-center gap-1 rounded-xl border border-slate-700 bg-slate-900/90 p-1">
           <button
             type="button"
@@ -1022,16 +1109,16 @@ export default function TradingChart({
           </button>
         </div>
 
-        <div className="relative flex-1">
+        <div className="relative min-w-0 flex-1 overflow-hidden">
           <div
             ref={containerRef}
-            className={`w-full overflow-hidden rounded-xl border border-slate-700 bg-slate-900 ${
+            className={`h-80 w-full max-w-full overflow-hidden rounded-xl border border-slate-700 bg-slate-900 ${
               isFullscreen ? "h-[calc(100vh-84px)]" : "h-80"
             }`}
           />
           <svg
             data-viewport-version={viewportVersion}
-            viewBox={`0 0 ${overlayWidth} ${overlayHeight}`}
+            viewBox={`0 0 ${overlaySize.width} ${overlaySize.height}`}
             className={`pointer-events-none absolute inset-0 h-full w-full ${
               activeTool === DRAWING_TOOLS.PAN ? "" : "pointer-events-auto"
             }`}
@@ -1041,7 +1128,14 @@ export default function TradingChart({
             onMouseLeave={handleOverlayPointerUp}
             onClick={handleOverlayClick}
           >
-            {renderShapes.map((shape, index) => renderShapeNode(shape, index))}
+            {overlayShapes.map((shape) => {
+              if (shape.kind === "line") {
+                const { key, kind: _kind, ...lineProps } = shape
+                return <line key={key} {...lineProps} />
+              }
+              const { key, kind: _kind, ...rectProps } = shape
+              return <rect key={key} {...rectProps} />
+            })}
           </svg>
         </div>
       </div>

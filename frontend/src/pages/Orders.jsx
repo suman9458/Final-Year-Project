@@ -7,11 +7,21 @@ function formatPrice(value) {
   return numeric.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+function escapeCsvCell(value) {
+  const text = String(value ?? "")
+  if (text.includes(",") || text.includes('"') || text.includes("\n")) {
+    return `"${text.replace(/"/g, '""')}"`
+  }
+  return text
+}
+
 export default function Orders() {
   const { positions, closedPositions, getCurrentPrice, calculateRunningPnl } = useTrading()
   const [statusFilter, setStatusFilter] = useState("ALL")
   const [sideFilter, setSideFilter] = useState("ALL")
   const [symbolQuery, setSymbolQuery] = useState("")
+  const [fromDate, setFromDate] = useState("")
+  const [toDate, setToDate] = useState("")
 
   const openRows = useMemo(
     () =>
@@ -65,9 +75,23 @@ export default function Orders() {
       if (statusFilter !== "ALL" && row.status !== statusFilter) return false
       if (sideFilter !== "ALL" && row.side !== sideFilter) return false
       if (symbolQuery.trim() && !row.pair.toLowerCase().includes(symbolQuery.trim().toLowerCase())) return false
+      if (fromDate || toDate) {
+        if (!row.createdAt) return false
+        const rowDate = new Date(row.createdAt)
+        if (Number.isNaN(rowDate.getTime())) return false
+
+        if (fromDate) {
+          const from = new Date(`${fromDate}T00:00:00`)
+          if (rowDate < from) return false
+        }
+        if (toDate) {
+          const to = new Date(`${toDate}T23:59:59.999`)
+          if (rowDate > to) return false
+        }
+      }
       return true
     })
-  }, [rows, sideFilter, statusFilter, symbolQuery])
+  }, [fromDate, rows, sideFilter, statusFilter, symbolQuery, toDate])
 
   const stats = useMemo(() => {
     const realized = closedRows.reduce((sum, row) => sum + row.pnl, 0)
@@ -81,6 +105,67 @@ export default function Orders() {
       winRate,
     }
   }, [closedRows, openRows.length])
+
+  const filteredStats = useMemo(() => {
+    const filteredOpen = filteredRows.filter((row) => row.status === "Open")
+    const filteredClosed = filteredRows.filter((row) => row.status === "Closed")
+    const running = filteredOpen.reduce((sum, row) => sum + row.pnl, 0)
+    const realized = filteredClosed.reduce((sum, row) => sum + row.pnl, 0)
+    return {
+      count: filteredRows.length,
+      running,
+      realized,
+      total: running + realized,
+    }
+  }, [filteredRows])
+
+  const handleExportCsv = () => {
+    if (filteredRows.length === 0) return
+
+    const headers = [
+      "Order ID",
+      "Pair",
+      "Side",
+      "Qty",
+      "Entry",
+      "SL",
+      "TP",
+      "Current/Close",
+      "PnL",
+      "Reason",
+      "Status",
+      "Timestamp",
+    ]
+
+    const lines = [headers.join(",")]
+    filteredRows.forEach((row) => {
+      const cells = [
+        row.orderId,
+        row.pair,
+        row.side,
+        row.quantity,
+        row.entry,
+        row.stopLoss ?? "",
+        row.takeProfit ?? "",
+        row.current,
+        row.pnl,
+        row.closeReason,
+        row.status,
+        row.createdAt ?? "",
+      ].map(escapeCsvCell)
+      lines.push(cells.join(","))
+    })
+
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `tradeone-orders-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <div className="space-y-4">
@@ -112,7 +197,7 @@ export default function Orders() {
       </section>
 
       <section className="app-surface soft-in space-y-3 rounded-xl p-4">
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-6">
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
@@ -137,6 +222,50 @@ export default function Orders() {
             placeholder="Search symbol (BTC, GOLD...)"
             className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-400 focus:border-sky-500"
           />
+          <input
+            type="date"
+            value={fromDate}
+            onChange={(event) => setFromDate(event.target.value)}
+            className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none focus:border-sky-500"
+          />
+          <input
+            type="date"
+            value={toDate}
+            onChange={(event) => setToDate(event.target.value)}
+            className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none focus:border-sky-500"
+          />
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            disabled={filteredRows.length === 0}
+            className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Export CSV
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+          <p className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-300">
+            Filtered Trades: <span className="font-semibold text-slate-100">{filteredStats.count}</span>
+          </p>
+          <p className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-300">
+            Running:{" "}
+            <span className={`font-semibold ${filteredStats.running >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+              ${filteredStats.running.toFixed(2)}
+            </span>
+          </p>
+          <p className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-300">
+            Realized:{" "}
+            <span className={`font-semibold ${filteredStats.realized >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+              ${filteredStats.realized.toFixed(2)}
+            </span>
+          </p>
+          <p className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-300">
+            Total:{" "}
+            <span className={`font-semibold ${filteredStats.total >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+              ${filteredStats.total.toFixed(2)}
+            </span>
+          </p>
         </div>
 
         {rows.length === 0 ? (

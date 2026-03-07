@@ -57,8 +57,15 @@ async function request(path, options = {}) {
   const data = await response.json()
 
   if (!response.ok) {
-    const error = new Error(data?.error || "Request failed.")
+    const message =
+      typeof data?.error === "string"
+        ? data.error
+        : data?.error?.message || data?.message || "Request failed."
+    const error = new Error(message)
     error.status = response.status
+    if (data?.error?.code) {
+      error.code = data.error.code
+    }
     throw error
   }
 
@@ -97,6 +104,38 @@ export function getSession() {
 
 export function clearSession() {
   localStorage.removeItem(SESSION_STORAGE_KEY)
+}
+
+function decodeJwtPayload(token) {
+  try {
+    const parts = String(token || "").split(".")
+    if (parts.length < 2) return null
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/")
+    const json = atob(base64)
+    return JSON.parse(json)
+  } catch {
+    return null
+  }
+}
+
+function updateSessionUser(nextUser) {
+  const current = getSession()
+  if (!current?.token) return null
+  const updated = {
+    ...current,
+    user: {
+      ...current.user,
+      ...nextUser,
+    },
+  }
+  writeSession(updated)
+  return updated
+}
+
+export function getCurrentSessionTokenId() {
+  const session = getSession()
+  const payload = decodeJwtPayload(session?.token)
+  return typeof payload?.sid === "string" ? payload.sid : null
 }
 
 function registerUserLocal(payload) {
@@ -257,4 +296,154 @@ export async function verifyPhoneOtp(payload) {
     }
     throw error
   }
+}
+
+export async function updateProfile(payload) {
+  const session = getSession()
+  const token = session?.token
+  if (!token) {
+    throw new Error("Missing session token.")
+  }
+
+  if (String(token).startsWith("demo-")) {
+    const users = readUsers()
+    const userIdx = users.findIndex((item) => item.id === session?.user?.id)
+    if (userIdx >= 0) {
+      users[userIdx] = {
+        ...users[userIdx],
+        name: payload?.name?.trim() || users[userIdx].name,
+        country: payload?.country?.trim() || users[userIdx].country,
+        proofOfAddress: payload?.proofOfAddress?.trim() || null,
+      }
+      writeUsers(users)
+      const updatedSession = updateSessionUser({
+        name: users[userIdx].name,
+        country: users[userIdx].country,
+        proofOfAddress: users[userIdx].proofOfAddress,
+      })
+      return updatedSession?.user || null
+    }
+    throw new Error("User not found in local mode.")
+  }
+
+  const response = await request("/auth/me/update", {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      name: String(payload?.name || "").trim(),
+      country: String(payload?.country || "").trim(),
+      proofOfAddress: String(payload?.proofOfAddress || "").trim(),
+    }),
+  })
+
+  const user = response?.user || null
+  if (!user) {
+    throw new Error("Invalid profile response.")
+  }
+  updateSessionUser(user)
+  return user
+}
+
+export async function changePassword(payload) {
+  const session = getSession()
+  const token = session?.token
+  if (!token) {
+    throw new Error("Missing session token.")
+  }
+
+  if (String(token).startsWith("demo-")) {
+    const users = readUsers()
+    const userIdx = users.findIndex((item) => item.id === session?.user?.id)
+    if (userIdx < 0) {
+      throw new Error("User not found in local mode.")
+    }
+    if (users[userIdx].password !== String(payload?.currentPassword || "")) {
+      throw new Error("Current password is incorrect.")
+    }
+    users[userIdx].password = String(payload?.newPassword || "")
+    writeUsers(users)
+    return { message: "Password updated successfully." }
+  }
+
+  return request("/auth/me/password", {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      currentPassword: String(payload?.currentPassword || ""),
+      newPassword: String(payload?.newPassword || ""),
+      confirmNewPassword: String(payload?.confirmNewPassword || ""),
+    }),
+  })
+}
+
+export async function logoutAllSessions() {
+  const session = getSession()
+  const token = session?.token
+  if (!token) {
+    throw new Error("Missing session token.")
+  }
+
+  if (String(token).startsWith("demo-")) {
+    return { message: "Logged out from all devices." }
+  }
+
+  return request("/auth/me/logout-all", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+}
+
+export async function fetchMySessions() {
+  const session = getSession()
+  const token = session?.token
+  if (!token) {
+    throw new Error("Missing session token.")
+  }
+
+  if (String(token).startsWith("demo-")) {
+    return [
+      {
+        id: "local-demo-session",
+        sessionTokenId: "demo-session-token",
+        userAgent: navigator.userAgent,
+        ipAddress: "127.0.0.1",
+        createdAt: new Date().toISOString(),
+        lastSeenAt: new Date().toISOString(),
+        revokedAt: null,
+      },
+    ]
+  }
+
+  const response = await request("/auth/me/sessions", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+  return Array.isArray(response?.sessions) ? response.sessions : []
+}
+
+export async function revokeMySession(sessionId) {
+  const session = getSession()
+  const token = session?.token
+  if (!token) {
+    throw new Error("Missing session token.")
+  }
+
+  if (String(token).startsWith("demo-")) {
+    return { message: "Session revoked successfully." }
+  }
+
+  return request(`/auth/me/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
 }

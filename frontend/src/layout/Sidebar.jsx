@@ -1,23 +1,29 @@
-import { NavLink } from "react-router-dom"
+import { useLocation } from "react-router-dom"
 
 const navItems = [
   { label: "Dashboard", to: "/dashboard" },
   { label: "Trading", to: "/trading" },
+  { label: "Alerts", to: "/alerts" },
   { label: "Wallet", to: "/wallet" },
   { label: "Orders", to: "/orders" },
+  { label: "Settings", to: "/settings" },
 ]
 
 export default function Sidebar({ isOpen, onClose }) {
+  const location = useLocation()
+
   return (
     <>
       <button
         type="button"
         aria-label="Close menu overlay"
         onClick={onClose}
-        className={`fixed inset-0 z-30 bg-black/40 transition ${isOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
+        className={`fixed inset-0 z-[115] bg-black/40 transition ${
+          isOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+        }`}
       />
       <aside
-        className={`app-surface fixed left-3 top-3 z-40 h-[calc(100vh-1.5rem)] w-72 rounded-2xl p-4 transition-transform ${
+        className={`app-surface pointer-events-auto fixed left-3 top-3 z-[120] h-[calc(100vh-1.5rem)] w-72 rounded-2xl p-4 transition-transform ${
           isOpen ? "translate-x-0" : "-translate-x-[120%]"
         }`}
       >
@@ -36,20 +42,18 @@ export default function Sidebar({ isOpen, onClose }) {
         </div>
         <nav className="space-y-2">
           {navItems.map((item) => (
-            <NavLink
+            <a
               key={item.to}
-              to={item.to}
+              href={item.to}
               onClick={onClose}
-              className={({ isActive }) =>
-                `block rounded-lg px-3 py-2 text-sm font-medium transition ${
-                  isActive
-                    ? "bg-sky-600 text-white shadow-[0_0_18px_rgba(14,165,233,0.38)]"
-                    : "text-slate-300 hover:bg-slate-800/80"
-                }`
-              }
+              className={`block w-full rounded-lg px-3 py-2 text-left text-sm font-medium transition ${
+                location.pathname === item.to
+                  ? "bg-sky-600 text-white shadow-[0_0_18px_rgba(14,165,233,0.38)]"
+                  : "text-slate-300 hover:bg-slate-800/80"
+              }`}
             >
               {item.label}
-            </NavLink>
+            </a>
           ))}
         </nav>
       </aside>

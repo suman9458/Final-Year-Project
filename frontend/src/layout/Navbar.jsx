@@ -19,7 +19,7 @@ export default function Navbar({ onMenuToggle }) {
   }
 
   return (
-    <header className="soft-in m-3 mb-0 flex items-center justify-between rounded-2xl border border-slate-700/60 bg-slate-900/80 px-4 py-3 backdrop-blur">
+    <header className="soft-in relative z-[110] m-3 mb-0 flex items-center justify-between rounded-2xl border border-slate-700/60 bg-slate-900/80 px-4 py-3 backdrop-blur">
       <div className="flex items-center gap-3">
         <button
           type="button"
