@@ -3,6 +3,7 @@ import { createContext, useContext, useMemo, useState } from "react"
 import {
   changePassword as changePasswordService,
   clearSession,
+  fetchProfile as fetchProfileService,
   fetchMySessions as fetchMySessionsService,
   getSession,
   loginUser,
@@ -11,6 +12,7 @@ import {
   registerUser,
   updateProfile as updateProfileService,
 } from "../services/authService"
+import { useEffect } from "react"
 
 const AuthContext = createContext(null)
 
@@ -18,6 +20,31 @@ export function AuthProvider({ children }) {
   const savedSession = getSession()
   const [user, setUser] = useState(savedSession?.user ?? null)
   const [token, setToken] = useState(savedSession?.token ?? null)
+
+  useEffect(() => {
+    if (!token) return
+    let isCancelled = false
+
+    async function hydrateUserProfile() {
+      try {
+        const freshUser = await fetchProfileService()
+        if (!isCancelled && freshUser) {
+          setUser(freshUser)
+        }
+      } catch {
+        if (!isCancelled) {
+          clearSession()
+          setUser(null)
+          setToken(null)
+        }
+      }
+    }
+
+    hydrateUserProfile()
+    return () => {
+      isCancelled = true
+    }
+  }, [token])
 
   const login = async (payload) => {
     const session = await loginUser(payload)

@@ -201,6 +201,11 @@ export async function registerUser(payload) {
       body: JSON.stringify(payload),
     })
     writeSession(session)
+    const freshUser = await fetchProfile()
+    if (freshUser) {
+      updateSessionUser(freshUser)
+      return { ...session, user: freshUser }
+    }
     return session
   } catch (error) {
     if (error.code === "NETWORK_ERROR") {
@@ -217,6 +222,11 @@ export async function loginUser(payload) {
       body: JSON.stringify(payload),
     })
     writeSession(session)
+    const freshUser = await fetchProfile()
+    if (freshUser) {
+      updateSessionUser(freshUser)
+      return { ...session, user: freshUser }
+    }
     return session
   } catch (error) {
     if (error.code === "NETWORK_ERROR") {
@@ -224,6 +234,35 @@ export async function loginUser(payload) {
     }
     throw error
   }
+}
+
+export async function fetchProfile() {
+  const session = getSession()
+  const token = session?.token
+  if (!token) return null
+
+  if (String(token).startsWith("demo-")) {
+    const users = readUsers()
+    const user = users.find((item) => item.id === session?.user?.id)
+    return (
+      user && {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        country: user.country,
+        phone: user.phone,
+        proofOfAddress: user.proofOfAddress ?? null,
+      }
+    )
+  }
+
+  const response = await request("/auth/me", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+  return response?.user || null
 }
 
 export async function sendPhoneOtp(phone) {
