@@ -5,6 +5,7 @@ const cors = require("cors")
 const authRoutes = require("./routes/authRoutes")
 const tradingRoutes = require("./routes/tradingRoutes")
 const pool = require("./db/pool")
+const { runMigrations } = require("./db/migrateCore")
 const { errorHandler } = require("./services/errorHandler")
 const { ensureAdminUserExists } = require("./services/authService")
 const {
@@ -55,6 +56,11 @@ app.use(errorHandler)
 
 async function startServer() {
   try {
+    const runMigrateOnStart = process.env.RUN_MIGRATIONS_ON_START !== "false"
+    if (runMigrateOnStart) {
+      await runMigrations()
+      console.log("Startup migrations check complete.")
+    }
     await pool.query("SELECT 1")
     console.log("PostgreSQL connection established.")
     await ensureAdminUserExists()

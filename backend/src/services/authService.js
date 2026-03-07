@@ -125,8 +125,9 @@ async function sendPhoneOtp(payload) {
   }
   assertPhoneFormat(phone)
   const isProd = process.env.NODE_ENV === "production"
-  const allowDemoOtpInProd = process.env.ALLOW_DEMO_OTP_IN_PRODUCTION === "true"
-  if (isProd && !isTwilioConfigured() && !allowDemoOtpInProd) {
+  const strictTwilioInProd = process.env.REQUIRE_TWILIO_IN_PRODUCTION === "true"
+  const allowDemoOtpInProd = process.env.ALLOW_DEMO_OTP_IN_PRODUCTION === "true" || !strictTwilioInProd
+  if (isProd && !isTwilioConfigured() && strictTwilioInProd && !allowDemoOtpInProd) {
     throw createHttpError(500, "Twilio is not configured on server.")
   }
 
