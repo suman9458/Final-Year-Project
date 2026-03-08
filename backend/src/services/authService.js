@@ -57,6 +57,7 @@ function sanitizeUser(user) {
     proofOfAddress: user.proof_of_address,
     phone: user.phone,
     role: user.role || "user",
+    isBlocked: Boolean(user.is_blocked),
     phoneVerifiedAt: user.phone_verified_at,
     createdAt: user.created_at,
   }
@@ -275,6 +276,9 @@ async function login(payload, requestMeta = {}) {
   if (!user) {
     throw createHttpError(401, "Invalid email or password.")
   }
+  if (user.is_blocked) {
+    throw createHttpError(403, "Your account is blocked. Contact support.")
+  }
 
   const isValid = await bcrypt.compare(password, user.password_hash)
   if (!isValid) {
@@ -303,6 +307,9 @@ async function getProfile(token) {
   const user = await findUserById(decoded.sub)
   if (!user) {
     throw createHttpError(404, "User not found.")
+  }
+  if (user.is_blocked) {
+    throw createHttpError(403, "Your account is blocked. Contact support.")
   }
   const userTokenVersion = Number(user.token_version || 0)
   const tokenVersion = Number(decoded?.tv || 0)

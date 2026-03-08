@@ -12,6 +12,18 @@ async function requireAuth(req, res, next) {
   }
 }
 
+function requireAdmin(req, res, next) {
+  const role = req.user?.role
+  if (role !== "admin") {
+    const error = new Error("Admin access required.")
+    error.status = 403
+    error.code = "FORBIDDEN"
+    return next(error)
+  }
+  return next()
+}
+
 module.exports = {
   requireAuth,
+  requireAdmin,
 }

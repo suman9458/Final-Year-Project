@@ -1,16 +1,25 @@
-import { useLocation } from "react-router-dom"
-
-const navItems = [
-  { label: "Dashboard", to: "/dashboard" },
-  { label: "Trading", to: "/trading" },
-  { label: "Alerts", to: "/alerts" },
-  { label: "Wallet", to: "/wallet" },
-  { label: "Orders", to: "/orders" },
-  { label: "Settings", to: "/settings" },
-]
+import { useLocation, useNavigate } from "react-router-dom"
+import { useAuth } from "../context/AuthContext"
 
 export default function Sidebar({ isOpen, onClose }) {
   const location = useLocation()
+  const navigate = useNavigate()
+  const { logout, user } = useAuth()
+  const navItems = [
+    { label: "Dashboard", to: "/dashboard" },
+    { label: "Trading", to: "/trading" },
+    { label: "Alerts", to: "/alerts" },
+    { label: "Wallet", to: "/wallet" },
+    { label: "Orders", to: "/orders" },
+    { label: "Settings", to: "/settings" },
+    ...(user?.role === "admin" ? [{ label: "Admin", to: "/admin" }] : []),
+  ]
+
+  const handleLogout = () => {
+    logout()
+    onClose()
+    navigate("/login", { replace: true })
+  }
 
   return (
     <>
@@ -56,6 +65,15 @@ export default function Sidebar({ isOpen, onClose }) {
             </a>
           ))}
         </nav>
+        <div className="mt-6 border-t border-slate-700/70 pt-4">
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="w-full rounded-lg bg-slate-800 px-3 py-2 text-left text-sm font-semibold text-slate-200 hover:bg-slate-700"
+          >
+            Logout
+          </button>
+        </div>
       </aside>
     </>
   )

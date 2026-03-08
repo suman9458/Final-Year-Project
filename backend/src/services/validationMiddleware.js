@@ -197,6 +197,22 @@ function validateSessionIdParam(req, res, next) {
   return next()
 }
 
+function validateAdminUserIdParam(req, res, next) {
+  const userId = String(req.params?.userId || "").trim()
+  if (!/^[0-9a-fA-F-]{36}$/.test(userId)) {
+    return next(createHttpError(400, "Invalid user id.", "VALIDATION_ERROR"))
+  }
+  req.params.userId = userId
+  return next()
+}
+
+function validateAdminUserStatusUpdate(req, res, next) {
+  if (typeof req.body?.isBlocked !== "boolean") {
+    return next(createHttpError(400, "isBlocked must be boolean.", "VALIDATION_ERROR"))
+  }
+  return next()
+}
+
 module.exports = {
   validateSendOtp,
   validateVerifyOtp,
@@ -205,5 +221,7 @@ module.exports = {
   validateProfileUpdate,
   validatePasswordUpdate,
   validateSessionIdParam,
+  validateAdminUserIdParam,
+  validateAdminUserStatusUpdate,
   validateTradingStatePayload,
 }

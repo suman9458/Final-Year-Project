@@ -1,4 +1,3 @@
-import { useNavigate } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import { useTrading } from "../context/TradingContext"
 
@@ -9,14 +8,8 @@ function formatMoney(value) {
 }
 
 export default function Navbar({ onMenuToggle }) {
-  const navigate = useNavigate()
-  const { user, logout } = useAuth()
+  const { user } = useAuth()
   const { demoBalance, totalRunningPnl, accountEquity } = useTrading()
-
-  const handleLogout = () => {
-    logout()
-    navigate("/login", { replace: true })
-  }
 
   return (
     <header className="soft-in relative z-[110] m-3 mb-0 flex items-center justify-between rounded-2xl border border-slate-700/60 bg-slate-900/80 px-4 py-3 backdrop-blur">
@@ -61,13 +54,6 @@ export default function Navbar({ onMenuToggle }) {
           </span>
         </div>
         <span className="hidden text-sm text-slate-400 sm:inline">{user?.name ?? "User"}</span>
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="rounded-lg bg-slate-800 px-3 py-1 text-xs font-semibold text-slate-200 hover:bg-slate-700 sm:text-sm"
-        >
-          Logout
-        </button>
       </div>
     </header>
   )

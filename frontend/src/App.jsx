@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom"
 import ProtectedRoute from "./components/ProtectedRoute"
+import AdminRoute from "./components/AdminRoute"
 import PublicRoute from "./components/PublicRoute"
 import MainLayout from "./layout/MainLayout"
 import Login from "./pages/Login"
@@ -10,6 +11,7 @@ import Wallet from "./pages/Wallet"
 import Orders from "./pages/Orders"
 import Settings from "./pages/Settings"
 import Alerts from "./pages/Alerts"
+import Admin from "./pages/Admin"
 
 export default function App() {
   return (
@@ -26,6 +28,9 @@ export default function App() {
           <Route path="/orders" element={<Orders />} />
           <Route path="/alerts" element={<Alerts />} />
           <Route path="/settings" element={<Settings />} />
+          <Route element={<AdminRoute />}>
+            <Route path="/admin" element={<Admin />} />
+          </Route>
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

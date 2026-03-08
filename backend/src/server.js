@@ -4,6 +4,7 @@ const express = require("express")
 const cors = require("cors")
 const authRoutes = require("./routes/authRoutes")
 const tradingRoutes = require("./routes/tradingRoutes")
+const adminRoutes = require("./routes/adminRoutes")
 const pool = require("./db/pool")
 const { runMigrations } = require("./db/migrateCore")
 const { errorHandler } = require("./services/errorHandler")
@@ -40,6 +41,7 @@ app.get("/api/health", (req, res) => {
 
 app.use("/api/auth", authRoutes)
 app.use("/api/trading", tradingRoutes)
+app.use("/api/admin", adminRoutes)
 
 app.use((req, res) => {
   res.status(404).json({

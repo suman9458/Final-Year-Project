@@ -91,6 +91,47 @@ async function updateUserRoleById(payload) {
   return result.rows[0] ?? null
 }
 
+async function listUsersForAdmin(limit = 200) {
+  const query = `
+    SELECT id, name, email, country, phone, role, is_blocked, created_at, updated_at
+    FROM users
+    ORDER BY created_at DESC
+    LIMIT $1;
+  `
+  const result = await pool.query(query, [limit])
+  return result.rows
+}
+
+async function updateUserBlockedStatusById(payload) {
+  const query = `
+    UPDATE users
+    SET is_blocked = $2, updated_at = NOW()
+    WHERE id = $1
+    RETURNING id, name, email, country, phone, role, is_blocked, created_at, updated_at;
+  `
+  const values = [payload.id, payload.isBlocked]
+  const result = await pool.query(query, values)
+  return result.rows[0] ?? null
+}
+
+async function getAdminDashboardStats() {
+  const query = `
+    SELECT
+      COUNT(*)::int AS total_users,
+      COUNT(*) FILTER (WHERE role = 'admin')::int AS total_admins,
+      COUNT(*) FILTER (WHERE role <> 'admin')::int AS total_traders,
+      COUNT(*) FILTER (WHERE is_blocked = TRUE)::int AS total_blocked
+    FROM users;
+  `
+  const result = await pool.query(query)
+  return result.rows[0] || {
+    total_users: 0,
+    total_admins: 0,
+    total_traders: 0,
+    total_blocked: 0,
+  }
+}
+
 module.exports = {
   findUserByEmail,
   findUserByPhone,
@@ -100,4 +141,7 @@ module.exports = {
   updateUserPasswordById,
   incrementUserTokenVersionById,
   updateUserRoleById,
+  listUsersForAdmin,
+  updateUserBlockedStatusById,
+  getAdminDashboardStats,
 }
