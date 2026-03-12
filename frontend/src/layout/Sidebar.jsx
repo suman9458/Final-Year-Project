@@ -37,9 +37,16 @@ export default function Sidebar({ isOpen, onClose }) {
         }`}
       >
         <div className="mb-6 flex items-start justify-between">
-          <div>
-            <h1 className="mb-1 text-xl font-bold">TradeOne</h1>
-            <p className="text-xs text-slate-400">Paper Trading Terminal</p>
+          <div className="flex items-center gap-2">
+            <img
+              src="/l0go.png"
+              alt="TradeOne logo"
+              className="h-8 w-8 rounded-full object-cover ring-1 ring-slate-600/70"
+            />
+            <div>
+              <h1 className="mb-1 text-xl font-bold">TradeOne</h1>
+              <p className="text-xs text-slate-400">Paper Trading Terminal</p>
+            </div>
           </div>
           <button
             type="button"

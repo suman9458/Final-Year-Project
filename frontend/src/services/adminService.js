@@ -72,3 +72,16 @@ export async function updateUserKycStatus(userId, kycStatus) {
   })
   return response?.user || null
 }
+
+export async function fetchAdminWalletRequests() {
+  const response = await request("/admin/wallet/requests", { method: "GET" })
+  return Array.isArray(response?.requests) ? response.requests : []
+}
+
+export async function updateAdminWalletRequestStatus(requestId, payload) {
+  const response = await request(`/admin/wallet/requests/${encodeURIComponent(requestId)}/status`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  })
+  return response?.request || null
+}

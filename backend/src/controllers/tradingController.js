@@ -1,4 +1,5 @@
 const { getTradingStateByUserId, upsertTradingState } = require("../models/tradingStateModel")
+const walletService = require("../services/walletService")
 
 function createHttpError(status, message) {
   const error = new Error(message)
@@ -45,7 +46,40 @@ async function saveState(req, res, next) {
   }
 }
 
+async function listMyWalletRequests(req, res, next) {
+  try {
+    const userId = req.user?.id
+    if (!userId) {
+      throw createHttpError(401, "Unauthorized.")
+    }
+    const requests = await walletService.getMyWalletRequests(userId)
+    res.status(200).json({ requests })
+  } catch (error) {
+    next(error)
+  }
+}
+
+async function createWalletRequest(req, res, next) {
+  try {
+    const userId = req.user?.id
+    if (!userId) {
+      throw createHttpError(401, "Unauthorized.")
+    }
+    const request = await walletService.submitWalletRequest({
+      userId,
+      requestType: req.body?.requestType,
+      amount: req.body?.amount,
+      note: req.body?.note,
+    })
+    res.status(201).json({ request })
+  } catch (error) {
+    next(error)
+  }
+}
+
 module.exports = {
   getState,
   saveState,
+  listMyWalletRequests,
+  createWalletRequest,
 }

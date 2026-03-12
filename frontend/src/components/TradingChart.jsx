@@ -138,6 +138,7 @@ export default function TradingChart({
   const candleSeriesRef = useRef(null)
   const socketRef = useRef(null)
   const priceLinesRef = useRef([])
+  const loadRequestIdRef = useRef(0)
   const [status, setStatus] = useState("loading")
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [timeframe, setTimeframe] = useState("1m")
@@ -333,7 +334,7 @@ export default function TradingChart({
         fixRightEdge: false,
         lockVisibleTimeRangeOnResize: true,
         rightBarStaysOnScroll: true,
-        shiftVisibleRangeOnNewBar: true,
+        shiftVisibleRangeOnNewBar: false,
       },
       handleScroll: {
         mouseWheel: true,
@@ -462,11 +463,16 @@ export default function TradingChart({
     if (!pair || !candleSeriesRef.current) return undefined
 
     let isMounted = true
+    const requestId = loadRequestIdRef.current + 1
+    loadRequestIdRef.current = requestId
     setStatus("loading")
+    // Avoid showing previous symbol candles while new symbol history loads.
+    candleSeriesRef.current.setData([])
 
     if (source === "demo") {
       const intervalSeconds = getIntervalSeconds(timeframe)
       const demoCandles = generateDemoCandles(seedPrice, timeframe)
+      if (loadRequestIdRef.current !== requestId) return undefined
       candleSeriesRef.current.setData(demoCandles)
       chartRef.current?.timeScale().fitContent()
       setStatus("live")
@@ -515,24 +521,24 @@ export default function TradingChart({
 
     fetchCandles(pair, timeframe)
       .then((candles) => {
-        if (!isMounted || !candleSeriesRef.current) return
+        if (!isMounted || !candleSeriesRef.current || loadRequestIdRef.current !== requestId) return
         candleSeriesRef.current.setData(candles)
         chartRef.current?.timeScale().fitContent()
         setStatus("live")
       })
       .catch(() => {
-        if (isMounted) setStatus("error")
+        if (isMounted && loadRequestIdRef.current === requestId) setStatus("error")
       })
 
     const ws = new WebSocket(`wss://stream.binance.com:9443/ws/${pair.toLowerCase()}@kline_${timeframe}`)
     socketRef.current = ws
 
     ws.onopen = () => {
-      if (isMounted) setStatus("live")
+      if (isMounted && loadRequestIdRef.current === requestId) setStatus("live")
     }
 
     ws.onmessage = (event) => {
-      if (!candleSeriesRef.current) return
+      if (!candleSeriesRef.current || loadRequestIdRef.current !== requestId) return
       const message = JSON.parse(event.data)
       const kline = message?.k
       if (!kline) return
@@ -547,11 +553,11 @@ export default function TradingChart({
     }
 
     ws.onerror = () => {
-      if (isMounted) setStatus("error")
+      if (isMounted && loadRequestIdRef.current === requestId) setStatus("error")
     }
 
     ws.onclose = () => {
-      if (isMounted) setStatus("disconnected")
+      if (isMounted && loadRequestIdRef.current === requestId) setStatus("disconnected")
     }
 
     return () => {
@@ -561,7 +567,7 @@ export default function TradingChart({
       }
       socketRef.current = null
     }
-  }, [pair, timeframe, source, seedPrice])
+  }, [pair, timeframe, source])
 
   useEffect(() => {
     setRiskDrafts((prev) => {
@@ -1163,17 +1169,14 @@ export default function TradingChart({
           </div>
         </div>
       ) : null}
-      <section className="rounded-xl border border-slate-700 bg-slate-900/70 p-3">
+      <section className="theme-soft-block rounded-xl p-3">
         <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-300">Position Risk (Chart)</h4>
         {positions.length === 0 ? (
           <p className="mt-2 text-xs text-slate-400">Open a trade on {symbol} to manage TP/SL from chart.</p>
         ) : (
           <div className="mt-2 space-y-2">
             {positions.map((position) => (
-              <div
-                key={position.id}
-                className="rounded-lg border border-slate-700 bg-slate-900 p-2 text-xs text-slate-200"
-              >
+              <div key={position.id} className="theme-soft-block rounded-lg p-2 text-xs text-slate-200">
                 <div className="mb-2 flex items-center justify-between">
                   <span className={position.type === "BUY" ? "text-emerald-300" : "text-rose-300"}>
                     #{position.id} {position.type}

@@ -224,6 +224,56 @@ function validateAdminUserKycUpdate(req, res, next) {
   return next()
 }
 
+function validateWalletRequestCreate(req, res, next) {
+  const requestType = String(req.body?.requestType || "")
+    .trim()
+    .toLowerCase()
+  const amount = Number(req.body?.amount)
+  const note = String(req.body?.note || "").trim()
+
+  if (!["deposit", "withdraw"].includes(requestType)) {
+    return next(createHttpError(400, "requestType must be deposit or withdraw.", "VALIDATION_ERROR"))
+  }
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return next(createHttpError(400, "amount must be a positive number.", "VALIDATION_ERROR"))
+  }
+  if (note.length > 300) {
+    return next(createHttpError(400, "note is too long.", "VALIDATION_ERROR"))
+  }
+
+  req.body.requestType = requestType
+  req.body.amount = Number(amount.toFixed(2))
+  req.body.note = note
+  return next()
+}
+
+function validateWalletRequestIdParam(req, res, next) {
+  const requestId = String(req.params?.requestId || "").trim()
+  if (!/^[0-9a-fA-F-]{36}$/.test(requestId)) {
+    return next(createHttpError(400, "Invalid wallet request id.", "VALIDATION_ERROR"))
+  }
+  req.params.requestId = requestId
+  return next()
+}
+
+function validateAdminWalletRequestStatusUpdate(req, res, next) {
+  const status = String(req.body?.status || "")
+    .trim()
+    .toLowerCase()
+  const reviewNote = String(req.body?.reviewNote || "").trim()
+
+  if (!["approved", "rejected"].includes(status)) {
+    return next(createHttpError(400, "status must be approved or rejected.", "VALIDATION_ERROR"))
+  }
+  if (reviewNote.length > 300) {
+    return next(createHttpError(400, "reviewNote is too long.", "VALIDATION_ERROR"))
+  }
+
+  req.body.status = status
+  req.body.reviewNote = reviewNote
+  return next()
+}
+
 module.exports = {
   validateSendOtp,
   validateVerifyOtp,
@@ -235,5 +285,8 @@ module.exports = {
   validateAdminUserIdParam,
   validateAdminUserStatusUpdate,
   validateAdminUserKycUpdate,
+  validateWalletRequestCreate,
+  validateWalletRequestIdParam,
+  validateAdminWalletRequestStatusUpdate,
   validateTradingStatePayload,
 }

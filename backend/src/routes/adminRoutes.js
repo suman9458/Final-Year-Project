@@ -5,12 +5,15 @@ const {
   validateAdminUserIdParam,
   validateAdminUserStatusUpdate,
   validateAdminUserKycUpdate,
+  validateWalletRequestIdParam,
+  validateAdminWalletRequestStatusUpdate,
 } = require("../services/validationMiddleware")
 
 const router = Router()
 
 router.get("/stats", requireAuth, requireAdmin, adminController.getStats)
 router.get("/users", requireAuth, requireAdmin, adminController.listUsers)
+router.get("/wallet/requests", requireAuth, requireAdmin, adminController.listWalletRequests)
 router.put(
   "/users/:userId/status",
   requireAuth,
@@ -18,6 +21,14 @@ router.put(
   validateAdminUserIdParam,
   validateAdminUserStatusUpdate,
   adminController.updateUserStatus
+)
+router.put(
+  "/wallet/requests/:requestId/status",
+  requireAuth,
+  requireAdmin,
+  validateWalletRequestIdParam,
+  validateAdminWalletRequestStatusUpdate,
+  adminController.updateWalletRequest
 )
 router.put(
   "/users/:userId/kyc",

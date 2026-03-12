@@ -24,7 +24,7 @@ export default function MainLayout() {
         </div>
       </main>
       {alertNotifications.length > 0 ? (
-        <div className="pointer-events-none fixed right-4 top-20 z-[130] flex w-[min(92vw,22rem)] flex-col gap-2">
+        <div className="pointer-events-none fixed right-4 top-20 z-130 flex w-[min(92vw,22rem)] flex-col gap-2">
           {alertNotifications.map((notification) => (
             <div
               key={notification.id}

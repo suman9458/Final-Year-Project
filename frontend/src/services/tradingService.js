@@ -61,3 +61,16 @@ export async function saveTradingState(state) {
   })
   return response?.state || null
 }
+
+export async function fetchMyWalletRequests() {
+  const response = await request("/trading/wallet/requests", { method: "GET" })
+  return Array.isArray(response?.requests) ? response.requests : []
+}
+
+export async function createWalletRequest(payload) {
+  const response = await request("/trading/wallet/requests", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
+  return response?.request || null
+}

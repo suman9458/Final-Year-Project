@@ -57,7 +57,7 @@ export default function Dashboard() {
             {positions.slice(0, 5).map((position) => (
               <li
                 key={position.id}
-                className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm"
+                className="theme-soft-block flex items-center justify-between rounded-lg px-3 py-2 text-sm"
               >
                 <span>
                   #{position.id} {position.symbol}

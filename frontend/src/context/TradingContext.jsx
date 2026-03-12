@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
-import { fetchTradingState, saveTradingState } from "../services/tradingService"
+import { fetchMyWalletRequests, fetchTradingState, saveTradingState } from "../services/tradingService"
 
 const TradingContext = createContext(null)
 
@@ -48,12 +48,23 @@ function formatAlertId(alertNumber) {
 
 function normalizeTradingState(rawState) {
   const parsed = rawState && typeof rawState === "object" ? rawState : {}
+  const rawClosed = Array.isArray(parsed?.closedPositions) ? parsed.closedPositions : []
+  const seenClosed = new Set()
+  const dedupedClosed = rawClosed.filter((item) => {
+    const key = `${String(item?.id || "")}|${String(item?.closedAt || "")}|${String(item?.closeReason || "")}`
+    if (seenClosed.has(key)) return false
+    seenClosed.add(key)
+    return true
+  })
   return {
     selectedPair: typeof parsed?.selectedPair === "string" ? parsed.selectedPair : null,
     positions: Array.isArray(parsed?.positions) ? parsed.positions : [],
-    closedPositions: Array.isArray(parsed?.closedPositions) ? parsed.closedPositions : [],
+    closedPositions: dedupedClosed,
     demoBalance: Number.isFinite(parsed?.demoBalance) ? Number(parsed.demoBalance) : INITIAL_DEMO_BALANCE,
     walletTransactions: Array.isArray(parsed?.walletTransactions) ? parsed.walletTransactions : [],
+    appliedWalletRequestIds: Array.isArray(parsed?.appliedWalletRequestIds)
+      ? parsed.appliedWalletRequestIds.map((item) => String(item))
+      : [],
     priceAlerts: Array.isArray(parsed?.priceAlerts) ? parsed.priceAlerts : [],
   }
 }
@@ -110,10 +121,16 @@ export function TradingProvider({ children }) {
     }
     return [createInitialDepositTransaction()]
   })
+  const [appliedWalletRequestIds, setAppliedWalletRequestIds] = useState(
+    () => persistedState?.appliedWalletRequestIds || []
+  )
   const [priceAlerts, setPriceAlerts] = useState(() => persistedState?.priceAlerts || [])
   const [alertNotifications, setAlertNotifications] = useState([])
   const reconnectTimerRef = useRef(null)
+  const priceFrameRef = useRef(null)
+  const pendingPricesRef = useRef({})
   const closingPositionIdsRef = useRef(new Set())
+  const finalizedCloseIdsRef = useRef(new Set())
   const nextPositionIdRef = useRef(getNextPositionId(persistedState?.positions || [], persistedState?.closedPositions || []))
   const nextTransactionIdRef = useRef(getNextTransactionNumber(persistedState?.walletTransactions || []))
   const nextAlertIdRef = useRef(getNextAlertNumber(persistedState?.priceAlerts || []))
@@ -140,10 +157,50 @@ export function TradingProvider({ children }) {
         setClosedPositions(normalized.closedPositions)
         setDemoBalance(normalized.demoBalance)
         setWalletTransactions(safeWalletTxns)
+        setAppliedWalletRequestIds(normalized.appliedWalletRequestIds || [])
         setPriceAlerts(normalized.priceAlerts)
         nextPositionIdRef.current = getNextPositionId(normalized.positions, normalized.closedPositions)
         nextTransactionIdRef.current = getNextTransactionNumber(safeWalletTxns)
         nextAlertIdRef.current = getNextAlertNumber(normalized.priceAlerts)
+
+        const requests = await fetchMyWalletRequests()
+        if (isCancelled || !Array.isArray(requests) || requests.length === 0) return
+
+        const appliedSet = new Set(normalized.appliedWalletRequestIds || [])
+        let nextBalance = Number(normalized.demoBalance)
+        const requestIdsToApply = []
+        const transactionsToAdd = []
+
+        requests.forEach((request) => {
+          if (String(request?.status || "").toLowerCase() !== "approved") return
+          const requestId = String(request?.id || "")
+          if (!requestId || appliedSet.has(requestId)) return
+
+          const amount = Number(request?.amount)
+          if (!Number.isFinite(amount) || amount <= 0) return
+
+          const type = String(request?.requestType || "").toLowerCase()
+          if (type === "withdraw" && nextBalance < amount) return
+
+          const signedAmount = type === "withdraw" ? -amount : amount
+          nextBalance += signedAmount
+          requestIdsToApply.push(requestId)
+          transactionsToAdd.push({
+            id: formatTxnId(nextTransactionIdRef.current),
+            type: type === "withdraw" ? "Withdrawal" : "Deposit",
+            amount: signedAmount,
+            status: "Completed",
+            createdAt: new Date().toISOString(),
+            note: `Wallet request approved (${requestId.slice(0, 8)})`,
+          })
+          nextTransactionIdRef.current += 1
+        })
+
+        if (requestIdsToApply.length > 0) {
+          setDemoBalance(nextBalance)
+          setAppliedWalletRequestIds((prev) => [...prev, ...requestIdsToApply])
+          setWalletTransactions((prev) => [...transactionsToAdd, ...prev])
+        }
       } catch {
         // Keep local mode state when API is unavailable.
       } finally {
@@ -169,6 +226,7 @@ export function TradingProvider({ children }) {
       closedPositions,
       demoBalance,
       walletTransactions,
+      appliedWalletRequestIds,
       priceAlerts,
     }
     window.localStorage.setItem(TRADING_STORAGE_KEY, JSON.stringify(payload))
@@ -185,15 +243,41 @@ export function TradingProvider({ children }) {
     return () => {
       if (remoteSyncTimerRef.current) clearTimeout(remoteSyncTimerRef.current)
     }
-  }, [selectedPair, positions, closedPositions, demoBalance, walletTransactions, priceAlerts])
+  }, [selectedPair, positions, closedPositions, demoBalance, walletTransactions, appliedWalletRequestIds, priceAlerts])
 
   useEffect(() => {
     let socket
     let isMounted = true
+    const clearScheduledFrame = () => {
+      if (priceFrameRef.current) {
+        cancelAnimationFrame(priceFrameRef.current)
+        priceFrameRef.current = null
+      }
+    }
+
+    const flushPendingPrices = () => {
+      priceFrameRef.current = null
+      const pending = pendingPricesRef.current
+      const pairs = Object.keys(pending)
+      if (pairs.length === 0) return
+
+      setMarkets((prev) =>
+        prev.map((market) => {
+          const nextPrice = pending[market.pair]
+          return Number.isFinite(nextPrice) ? { ...market, price: nextPrice } : market
+        })
+      )
+      pendingPricesRef.current = {}
+    }
+
+    const schedulePriceFlush = () => {
+      if (priceFrameRef.current) return
+      priceFrameRef.current = requestAnimationFrame(flushPendingPrices)
+    }
 
     const connect = () => {
       const binancePairs = initialMarkets.filter((market) => market.source === "binance").map((market) => market.pair)
-      const streams = binancePairs.map((pair) => `${pair.toLowerCase()}@ticker`).join("/")
+      const streams = binancePairs.map((pair) => `${pair.toLowerCase()}@bookTicker`).join("/")
       if (!streams) return
 
       socket = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`)
@@ -205,10 +289,17 @@ export function TradingProvider({ children }) {
       socket.onmessage = (event) => {
         const message = JSON.parse(event.data)
         const pair = message?.data?.s
-        const livePrice = Number(message?.data?.c)
+        const bestBid = Number(message?.data?.b)
+        const bestAsk = Number(message?.data?.a)
+        const fallbackLastPrice = Number(message?.data?.c)
+        const livePrice =
+          Number.isFinite(bestBid) && Number.isFinite(bestAsk) && bestBid > 0 && bestAsk > 0
+            ? (bestBid + bestAsk) / 2
+            : fallbackLastPrice
         if (!pair || !Number.isFinite(livePrice)) return
 
-        setMarkets((prev) => prev.map((market) => (market.pair === pair ? { ...market, price: livePrice } : market)))
+        pendingPricesRef.current[pair] = livePrice
+        schedulePriceFlush()
       }
 
       socket.onerror = () => {
@@ -218,7 +309,7 @@ export function TradingProvider({ children }) {
       socket.onclose = () => {
         if (!isMounted) return
         setMarketConnectionStatus("reconnecting")
-        reconnectTimerRef.current = setTimeout(connect, 3000)
+        reconnectTimerRef.current = setTimeout(connect, 1200)
       }
     }
 
@@ -227,6 +318,8 @@ export function TradingProvider({ children }) {
     return () => {
       isMounted = false
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+      clearScheduledFrame()
+      pendingPricesRef.current = {}
       if (socket && socket.readyState !== WebSocket.CLOSED) {
         socket.close()
       }
@@ -452,11 +545,16 @@ export function TradingProvider({ children }) {
       closingPositionIdsRef.current.add(positionId)
 
       setPositions((prev) => {
+        if (finalizedCloseIdsRef.current.has(positionId)) {
+          return prev.filter((position) => position.id !== positionId)
+        }
+
         const positionToClose = prev.find((position) => position.id === positionId)
         if (!positionToClose) {
           closingPositionIdsRef.current.delete(positionId)
           return prev
         }
+        finalizedCloseIdsRef.current.add(positionId)
 
         const closeReason = options.reason || "Manual Close"
         const overrideClosePrice = Number(options.closePrice)
@@ -501,10 +599,13 @@ export function TradingProvider({ children }) {
 
           return nextBalance
         })
-        closingPositionIdsRef.current.delete(positionId)
 
         return prev.filter((position) => position.id !== positionId)
       })
+
+      setTimeout(() => {
+        closingPositionIdsRef.current.delete(positionId)
+      }, 0)
     },
     [getCurrentPrice]
   )
@@ -673,6 +774,7 @@ export function TradingProvider({ children }) {
 
   const resetDemoAccount = useCallback(() => {
     closingPositionIdsRef.current.clear()
+    finalizedCloseIdsRef.current.clear()
     nextPositionIdRef.current = 1
     nextTransactionIdRef.current = 1002
     setPositions([])
@@ -743,6 +845,7 @@ export function TradingProvider({ children }) {
       freeMargin,
       maxRiskPerTradeAmount,
       walletTransactions,
+      appliedWalletRequestIds,
       priceAlerts,
       positions,
       closedPositions,
@@ -780,6 +883,7 @@ export function TradingProvider({ children }) {
       maxRiskPerTradeAmount,
       updatePositionRisk,
       walletTransactions,
+      appliedWalletRequestIds,
       priceAlerts,
       withdrawDemoFunds,
       resetDemoAccount,

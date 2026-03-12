@@ -387,7 +387,7 @@ export default function Settings() {
             {activeSessions.map((session) => {
               const isCurrent = session.sessionTokenId === getCurrentSessionTokenId()
               return (
-                <div key={session.id} className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
+                <div key={session.id} className="theme-soft-block rounded-lg p-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <p className="text-xs text-slate-300">
                       {isCurrent ? "Current Session" : "Session"} | {session.ipAddress || "Unknown IP"}

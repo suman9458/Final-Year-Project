@@ -23,17 +23,38 @@ export default function Orders() {
   const [fromDate, setFromDate] = useState("")
   const [toDate, setToDate] = useState("")
 
+  const uniqueClosedTrades = useMemo(() => {
+    const seenTradeIds = new Set()
+
+    return closedPositions.filter((position) => {
+      const tradeId = String(position?.id ?? "")
+      if (!tradeId || seenTradeIds.has(tradeId)) return false
+      seenTradeIds.add(tradeId)
+      return true
+    })
+  }, [closedPositions])
+
+  const closedTradeIds = useMemo(
+    () => new Set(uniqueClosedTrades.map((position) => String(position.id))),
+    [uniqueClosedTrades]
+  )
+
   const openRows = useMemo(
     () =>
-      positions.map((position) => {
+      positions
+        .filter((position) => !closedTradeIds.has(String(position.id)))
+        .map((position) => {
         const currentPrice = getCurrentPrice(position.symbol)
         const pnl = calculateRunningPnl(position)
+        const operationSide = position.type === "BUY" ? "BUY" : "SELL"
 
         return {
           rowKey: `open-${position.id}`,
           orderId: `ORD-${String(position.id).padStart(4, "0")}`,
           pair: position.symbol,
-          side: position.type,
+          side: operationSide,
+          operationType: operationSide === "BUY" ? "Buy" : "Sell",
+          executionFlow: "Open",
           quantity: position.quantity,
           entry: position.entryPrice,
           stopLoss: position.stopLoss,
@@ -45,27 +66,33 @@ export default function Orders() {
           createdAt: position.createdAt,
         }
       }),
-    [calculateRunningPnl, getCurrentPrice, positions]
+    [calculateRunningPnl, closedTradeIds, getCurrentPrice, positions]
   )
 
   const closedRows = useMemo(
     () =>
-      closedPositions.map((position) => ({
-        rowKey: `closed-${position.id}-${position.closedAt}`,
-        orderId: `ORD-${String(position.id).padStart(4, "0")}`,
-        pair: position.symbol,
-        side: position.type,
-        quantity: position.quantity,
-        entry: position.entryPrice,
-        stopLoss: position.stopLoss,
-        takeProfit: position.takeProfit,
-        current: position.closePrice,
-        pnl: position.closedPnl,
-        closeReason: position.closeReason || "Manual Close",
-        status: "Closed",
-        createdAt: position.closedAt,
-      })),
-    [closedPositions]
+      uniqueClosedTrades.map((position) => {
+        const originalSide = position.type === "BUY" ? "BUY" : "SELL"
+
+        return {
+          rowKey: `closed-${position.id}`,
+          orderId: `ORD-${String(position.id).padStart(4, "0")}`,
+          pair: position.symbol,
+          side: originalSide,
+          operationType: originalSide === "BUY" ? "Buy" : "Sell",
+          executionFlow: "Complete",
+          quantity: position.quantity,
+          entry: position.entryPrice,
+          stopLoss: position.stopLoss,
+          takeProfit: position.takeProfit,
+          current: position.closePrice,
+          pnl: position.closedPnl,
+          closeReason: position.closeReason || "Manual Close",
+          status: "Closed",
+          createdAt: position.closedAt,
+        }
+      }),
+    [uniqueClosedTrades]
   )
 
   const rows = useMemo(() => [...openRows, ...closedRows], [closedRows, openRows])
@@ -75,11 +102,11 @@ export default function Orders() {
       if (statusFilter !== "ALL" && row.status !== statusFilter) return false
       if (sideFilter !== "ALL" && row.side !== sideFilter) return false
       if (symbolQuery.trim() && !row.pair.toLowerCase().includes(symbolQuery.trim().toLowerCase())) return false
+
       if (fromDate || toDate) {
         if (!row.createdAt) return false
         const rowDate = new Date(row.createdAt)
         if (Number.isNaN(rowDate.getTime())) return false
-
         if (fromDate) {
           const from = new Date(`${fromDate}T00:00:00`)
           if (rowDate < from) return false
@@ -89,6 +116,7 @@ export default function Orders() {
           if (rowDate > to) return false
         }
       }
+
       return true
     })
   }, [fromDate, rows, sideFilter, statusFilter, symbolQuery, toDate])
@@ -106,19 +134,6 @@ export default function Orders() {
     }
   }, [closedRows, openRows.length])
 
-  const filteredStats = useMemo(() => {
-    const filteredOpen = filteredRows.filter((row) => row.status === "Open")
-    const filteredClosed = filteredRows.filter((row) => row.status === "Closed")
-    const running = filteredOpen.reduce((sum, row) => sum + row.pnl, 0)
-    const realized = filteredClosed.reduce((sum, row) => sum + row.pnl, 0)
-    return {
-      count: filteredRows.length,
-      running,
-      realized,
-      total: running + realized,
-    }
-  }, [filteredRows])
-
   const handleExportCsv = () => {
     if (filteredRows.length === 0) return
 
@@ -126,14 +141,16 @@ export default function Orders() {
       "Order ID",
       "Pair",
       "Side",
+      "Operation Type",
+      "Execution Flow",
       "Qty",
       "Entry",
       "SL",
       "TP",
       "Current/Close",
       "PnL",
-      "Reason",
       "Status",
+      "Close Reason",
       "Timestamp",
     ]
 
@@ -143,14 +160,16 @@ export default function Orders() {
         row.orderId,
         row.pair,
         row.side,
+        row.operationType,
+        row.executionFlow,
         row.quantity,
         row.entry,
         row.stopLoss ?? "",
         row.takeProfit ?? "",
         row.current,
         row.pnl,
-        row.closeReason,
         row.status,
+        row.closeReason,
         row.createdAt ?? "",
       ].map(escapeCsvCell)
       lines.push(cells.join(","))
@@ -185,7 +204,7 @@ export default function Orders() {
           <p className="mt-2 text-2xl font-bold text-slate-100">{stats.closedCount}</p>
         </article>
         <article className="app-surface soft-in rounded-xl p-4">
-          <p className="text-xs text-slate-400">Realized P&L</p>
+          <p className="text-xs text-slate-400">Realized Profit</p>
           <p className={`mt-2 text-2xl font-bold ${stats.realizedPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
             ${stats.realizedPnl.toFixed(2)}
           </p>
@@ -219,7 +238,7 @@ export default function Orders() {
           <input
             value={symbolQuery}
             onChange={(event) => setSymbolQuery(event.target.value)}
-            placeholder="Search symbol (BTC, GOLD...)"
+            placeholder="Search symbol"
             className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-400 focus:border-sky-500"
           />
           <input
@@ -246,24 +265,48 @@ export default function Orders() {
 
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
           <p className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-300">
-            Filtered Trades: <span className="font-semibold text-slate-100">{filteredStats.count}</span>
+            Filtered Trades: <span className="font-semibold text-slate-100">{filteredRows.length}</span>
           </p>
           <p className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-300">
             Running:{" "}
-            <span className={`font-semibold ${filteredStats.running >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-              ${filteredStats.running.toFixed(2)}
+            <span
+              className={`font-semibold ${
+                filteredRows.filter((row) => row.status === "Open").reduce((sum, row) => sum + row.pnl, 0) >= 0
+                  ? "text-emerald-400"
+                  : "text-rose-400"
+              }`}
+            >
+              $
+              {filteredRows
+                .filter((row) => row.status === "Open")
+                .reduce((sum, row) => sum + row.pnl, 0)
+                .toFixed(2)}
             </span>
           </p>
           <p className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-300">
             Realized:{" "}
-            <span className={`font-semibold ${filteredStats.realized >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-              ${filteredStats.realized.toFixed(2)}
+            <span
+              className={`font-semibold ${
+                filteredRows.filter((row) => row.status === "Closed").reduce((sum, row) => sum + row.pnl, 0) >= 0
+                  ? "text-emerald-400"
+                  : "text-rose-400"
+              }`}
+            >
+              $
+              {filteredRows
+                .filter((row) => row.status === "Closed")
+                .reduce((sum, row) => sum + row.pnl, 0)
+                .toFixed(2)}
             </span>
           </p>
           <p className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-300">
             Total:{" "}
-            <span className={`font-semibold ${filteredStats.total >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-              ${filteredStats.total.toFixed(2)}
+            <span
+              className={`font-semibold ${
+                filteredRows.reduce((sum, row) => sum + row.pnl, 0) >= 0 ? "text-emerald-400" : "text-rose-400"
+              }`}
+            >
+              ${filteredRows.reduce((sum, row) => sum + row.pnl, 0).toFixed(2)}
             </span>
           </p>
         </div>
@@ -280,6 +323,8 @@ export default function Orders() {
                   <th className="px-2 py-2">Order ID</th>
                   <th className="px-2 py-2">Pair</th>
                   <th className="px-2 py-2">Side</th>
+                  <th className="px-2 py-2">Operation</th>
+                  <th className="px-2 py-2">Execution</th>
                   <th className="px-2 py-2">Qty</th>
                   <th className="px-2 py-2">Entry</th>
                   <th className="px-2 py-2">SL</th>
@@ -296,6 +341,8 @@ export default function Orders() {
                     <td className="px-2 py-2">{row.orderId}</td>
                     <td className="px-2 py-2">{row.pair}</td>
                     <td className={`px-2 py-2 ${row.side === "BUY" ? "text-emerald-400" : "text-rose-400"}`}>{row.side}</td>
+                    <td className="px-2 py-2 text-slate-300">{row.operationType}</td>
+                    <td className="px-2 py-2 text-slate-300">{row.executionFlow}</td>
                     <td className="px-2 py-2">{row.quantity}</td>
                     <td className="px-2 py-2">${formatPrice(row.entry)}</td>
                     <td className="px-2 py-2">{row.stopLoss ? `$${formatPrice(row.stopLoss)}` : "-"}</td>
