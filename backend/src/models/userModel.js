@@ -93,7 +93,19 @@ async function updateUserRoleById(payload) {
 
 async function listUsersForAdmin(limit = 200) {
   const query = `
-    SELECT id, name, email, country, phone, role, is_blocked, created_at, updated_at
+    SELECT
+      id,
+      name,
+      email,
+      country,
+      phone,
+      role,
+      is_blocked,
+      kyc_status,
+      proof_of_address,
+      phone_verified_at,
+      created_at,
+      updated_at
     FROM users
     ORDER BY created_at DESC
     LIMIT $1;
@@ -107,9 +119,45 @@ async function updateUserBlockedStatusById(payload) {
     UPDATE users
     SET is_blocked = $2, updated_at = NOW()
     WHERE id = $1
-    RETURNING id, name, email, country, phone, role, is_blocked, created_at, updated_at;
+    RETURNING
+      id,
+      name,
+      email,
+      country,
+      phone,
+      role,
+      is_blocked,
+      kyc_status,
+      proof_of_address,
+      phone_verified_at,
+      created_at,
+      updated_at;
   `
   const values = [payload.id, payload.isBlocked]
+  const result = await pool.query(query, values)
+  return result.rows[0] ?? null
+}
+
+async function updateUserKycStatusById(payload) {
+  const query = `
+    UPDATE users
+    SET kyc_status = $2, updated_at = NOW()
+    WHERE id = $1
+    RETURNING
+      id,
+      name,
+      email,
+      country,
+      phone,
+      role,
+      is_blocked,
+      kyc_status,
+      proof_of_address,
+      phone_verified_at,
+      created_at,
+      updated_at;
+  `
+  const values = [payload.id, payload.kycStatus]
   const result = await pool.query(query, values)
   return result.rows[0] ?? null
 }
@@ -143,5 +191,6 @@ module.exports = {
   updateUserRoleById,
   listUsersForAdmin,
   updateUserBlockedStatusById,
+  updateUserKycStatusById,
   getAdminDashboardStats,
 }

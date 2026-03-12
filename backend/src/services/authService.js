@@ -447,6 +447,21 @@ async function ensureAdminUserExists() {
         role: "admin",
       })
     }
+
+    // Keep bootstrap admin credentials usable across deploys/environments.
+    let passwordMatches = false
+    try {
+      passwordMatches = await bcrypt.compare(password, existing.password_hash || "")
+    } catch {
+      passwordMatches = false
+    }
+    if (!passwordMatches) {
+      const passwordHash = await bcrypt.hash(password, 10)
+      await updateUserPasswordById({
+        id: existing.id,
+        passwordHash,
+      })
+    }
     return
   }
 

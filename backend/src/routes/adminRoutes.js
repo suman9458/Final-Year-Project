@@ -1,7 +1,11 @@
 const { Router } = require("express")
 const adminController = require("../controllers/adminController")
 const { requireAuth, requireAdmin } = require("../services/authMiddleware")
-const { validateAdminUserIdParam, validateAdminUserStatusUpdate } = require("../services/validationMiddleware")
+const {
+  validateAdminUserIdParam,
+  validateAdminUserStatusUpdate,
+  validateAdminUserKycUpdate,
+} = require("../services/validationMiddleware")
 
 const router = Router()
 
@@ -15,6 +19,13 @@ router.put(
   validateAdminUserStatusUpdate,
   adminController.updateUserStatus
 )
+router.put(
+  "/users/:userId/kyc",
+  requireAuth,
+  requireAdmin,
+  validateAdminUserIdParam,
+  validateAdminUserKycUpdate,
+  adminController.updateUserKyc
+)
 
 module.exports = router
-

@@ -213,6 +213,17 @@ function validateAdminUserStatusUpdate(req, res, next) {
   return next()
 }
 
+function validateAdminUserKycUpdate(req, res, next) {
+  const kycStatus = String(req.body?.kycStatus || "")
+    .trim()
+    .toLowerCase()
+  if (!["pending", "approved", "rejected"].includes(kycStatus)) {
+    return next(createHttpError(400, "kycStatus must be one of pending, approved, rejected.", "VALIDATION_ERROR"))
+  }
+  req.body.kycStatus = kycStatus
+  return next()
+}
+
 module.exports = {
   validateSendOtp,
   validateVerifyOtp,
@@ -223,5 +234,6 @@ module.exports = {
   validateSessionIdParam,
   validateAdminUserIdParam,
   validateAdminUserStatusUpdate,
+  validateAdminUserKycUpdate,
   validateTradingStatePayload,
 }

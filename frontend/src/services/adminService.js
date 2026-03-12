@@ -65,3 +65,10 @@ export async function updateUserBlockedStatus(userId, isBlocked) {
   return response?.user || null
 }
 
+export async function updateUserKycStatus(userId, kycStatus) {
+  const response = await request(`/admin/users/${encodeURIComponent(userId)}/kyc`, {
+    method: "PUT",
+    body: JSON.stringify({ kycStatus }),
+  })
+  return response?.user || null
+}

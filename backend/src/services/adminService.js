@@ -2,6 +2,7 @@ const {
   getAdminDashboardStats,
   listUsersForAdmin,
   updateUserBlockedStatusById,
+  updateUserKycStatusById,
   incrementUserTokenVersionById,
 } = require("../models/userModel")
 
@@ -21,6 +22,9 @@ function sanitizeAdminUser(row) {
     phone: row.phone,
     role: row.role || "user",
     isBlocked: Boolean(row.is_blocked),
+    kycStatus: row.kyc_status || "pending",
+    proofOfAddress: row.proof_of_address || "",
+    phoneVerifiedAt: row.phone_verified_at || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -71,9 +75,46 @@ async function setUserBlockedStatus(payload) {
   return sanitizeAdminUser(updated)
 }
 
+async function setUserKycStatus(payload) {
+  const userId = String(payload?.userId || "").trim()
+  const actorUserId = String(payload?.actorUserId || "").trim()
+  const kycStatus = String(payload?.kycStatus || "")
+    .trim()
+    .toLowerCase()
+
+  if (!userId) {
+    throw createHttpError(400, "userId is required.", "VALIDATION_ERROR")
+  }
+  if (!actorUserId) {
+    throw createHttpError(401, "Unauthorized.", "UNAUTHORIZED")
+  }
+  if (!["pending", "approved", "rejected"].includes(kycStatus)) {
+    throw createHttpError(400, "Invalid KYC status.", "VALIDATION_ERROR")
+  }
+
+  const rows = await listUsersForAdmin(500)
+  const targetUser = rows.find((row) => row.id === userId)
+  if (!targetUser) {
+    throw createHttpError(404, "User not found.", "NOT_FOUND")
+  }
+  if ((targetUser.role || "user") === "admin") {
+    throw createHttpError(400, "Admin KYC status cannot be changed.", "INVALID_OPERATION")
+  }
+
+  const updated = await updateUserKycStatusById({
+    id: userId,
+    kycStatus,
+  })
+  if (!updated) {
+    throw createHttpError(404, "User not found.", "NOT_FOUND")
+  }
+
+  return sanitizeAdminUser(updated)
+}
+
 module.exports = {
   getAdminStats,
   getAllUsers,
   setUserBlockedStatus,
+  setUserKycStatus,
 }
-

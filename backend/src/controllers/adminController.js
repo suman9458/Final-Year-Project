@@ -31,9 +31,22 @@ async function updateUserStatus(req, res, next) {
   }
 }
 
+async function updateUserKyc(req, res, next) {
+  try {
+    const user = await adminService.setUserKycStatus({
+      userId: req.params.userId,
+      actorUserId: req.user?.id,
+      kycStatus: req.body?.kycStatus,
+    })
+    res.status(200).json({ user })
+  } catch (error) {
+    next(error)
+  }
+}
+
 module.exports = {
   getStats,
   listUsers,
   updateUserStatus,
+  updateUserKyc,
 }
-

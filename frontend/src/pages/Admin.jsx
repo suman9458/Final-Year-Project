@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from "react"
-import { fetchAdminStats, fetchAdminUsers, updateUserBlockedStatus } from "../services/adminService"
+import {
+  fetchAdminStats,
+  fetchAdminUsers,
+  updateUserBlockedStatus,
+  updateUserKycStatus,
+} from "../services/adminService"
 import { useAuth } from "../context/AuthContext"
 
 export default function Admin() {
@@ -9,6 +14,7 @@ export default function Admin() {
   const [error, setError] = useState("")
   const [isLoading, setIsLoading] = useState(true)
   const [updatingUserId, setUpdatingUserId] = useState("")
+  const [updatingKycUserId, setUpdatingKycUserId] = useState("")
 
   const nonAdminUsers = useMemo(() => users.filter((item) => item.role !== "admin"), [users])
 
@@ -48,6 +54,20 @@ export default function Admin() {
       setError(err.message || "Failed to update user status.")
     } finally {
       setUpdatingUserId("")
+    }
+  }
+
+  const handleKycStatusChange = async (targetUser, kycStatus) => {
+    if (targetUser.kycStatus === kycStatus) return
+    setError("")
+    setUpdatingKycUserId(targetUser.id)
+    try {
+      const updated = await updateUserKycStatus(targetUser.id, kycStatus)
+      setUsers((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+    } catch (err) {
+      setError(err.message || "Failed to update KYC status.")
+    } finally {
+      setUpdatingKycUserId("")
     }
   }
 
@@ -104,6 +124,7 @@ export default function Admin() {
                   <th className="px-2 py-2">Email</th>
                   <th className="px-2 py-2">Phone</th>
                   <th className="px-2 py-2">Country</th>
+                  <th className="px-2 py-2">KYC</th>
                   <th className="px-2 py-2">Status</th>
                   <th className="px-2 py-2">Action</th>
                 </tr>
@@ -115,6 +136,18 @@ export default function Admin() {
                     <td className="px-2 py-2">{item.email}</td>
                     <td className="px-2 py-2">{item.phone}</td>
                     <td className="px-2 py-2">{item.country}</td>
+                    <td className="px-2 py-2">
+                      <select
+                        value={item.kycStatus || "pending"}
+                        disabled={updatingKycUserId === item.id}
+                        onChange={(event) => handleKycStatusChange(item, event.target.value)}
+                        className="rounded-md border border-slate-600 bg-slate-900 px-2 py-1 text-xs text-slate-200 disabled:opacity-60"
+                      >
+                        <option value="pending">Pending</option>
+                        <option value="approved">Approved</option>
+                        <option value="rejected">Rejected</option>
+                      </select>
+                    </td>
                     <td className="px-2 py-2">
                       <span
                         className={`rounded-full px-2 py-1 text-xs ${
@@ -146,4 +179,3 @@ export default function Admin() {
     </div>
   )
 }
-
