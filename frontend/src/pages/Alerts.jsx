@@ -13,6 +13,7 @@ export default function Alerts() {
   const { markets, selectedMarket, priceAlerts, createPriceAlert, removePriceAlert, reactivatePriceAlert } = useTrading()
   const [pair, setPair] = useState(selectedMarket?.pair || markets[0]?.pair || "")
   const [direction, setDirection] = useState("above")
+  const [mode, setMode] = useState("one-time")
   const [targetPrice, setTargetPrice] = useState("")
   const [error, setError] = useState("")
 
@@ -25,6 +26,7 @@ export default function Alerts() {
       pair: selectedPairMarket?.pair,
       symbol: selectedPairMarket?.symbol,
       direction,
+      mode,
       targetPrice: target,
     })
     if (!result?.ok) {
@@ -43,7 +45,7 @@ export default function Alerts() {
       </section>
 
       <section className="app-surface soft-in rounded-xl p-5">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
           <select
             value={pair}
             onChange={(e) => setPair(e.target.value)}
@@ -62,6 +64,14 @@ export default function Alerts() {
           >
             <option value="above">Price Above</option>
             <option value="below">Price Below</option>
+          </select>
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value)}
+            className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none focus:border-sky-500"
+          >
+            <option value="one-time">One-time</option>
+            <option value="recurring">Recurring</option>
           </select>
           <input
             type="number"
@@ -92,7 +102,7 @@ export default function Alerts() {
             {priceAlerts.map((alert) => (
               <div
                 key={alert.id}
-                className="flex flex-col gap-2 rounded-lg border border-slate-700 bg-slate-900/70 p-3 sm:flex-row sm:items-center sm:justify-between"
+                className="theme-soft-block flex flex-col gap-2 rounded-lg p-3 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div>
                   <p className="text-sm font-semibold text-slate-100">
@@ -100,7 +110,9 @@ export default function Alerts() {
                   </p>
                   <p className="text-xs text-slate-400">
                     {alert.isActive
-                      ? "Active"
+                      ? alert.triggeredAt
+                        ? `${alert.mode === "recurring" ? "Recurring" : "Active"} | Last triggered ${new Date(alert.triggeredAt).toLocaleString()}`
+                        : `Active | ${alert.mode === "recurring" ? "Recurring" : "One-time"}`
                       : alert.triggeredAt
                         ? `Triggered at ${new Date(alert.triggeredAt).toLocaleString()}`
                         : "Inactive"}
@@ -132,4 +144,3 @@ export default function Alerts() {
     </div>
   )
 }
-

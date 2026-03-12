@@ -65,7 +65,14 @@ function normalizeTradingState(rawState) {
     appliedWalletRequestIds: Array.isArray(parsed?.appliedWalletRequestIds)
       ? parsed.appliedWalletRequestIds.map((item) => String(item))
       : [],
-    priceAlerts: Array.isArray(parsed?.priceAlerts) ? parsed.priceAlerts : [],
+    priceAlerts: Array.isArray(parsed?.priceAlerts)
+      ? parsed.priceAlerts.map((alert) => ({
+          ...alert,
+          mode: alert?.mode === "recurring" ? "recurring" : "one-time",
+          conditionMet: Boolean(alert?.conditionMet),
+        }))
+      : [],
+    notifications: Array.isArray(parsed?.notifications) ? parsed.notifications : [],
   }
 }
 
@@ -125,6 +132,7 @@ export function TradingProvider({ children }) {
     () => persistedState?.appliedWalletRequestIds || []
   )
   const [priceAlerts, setPriceAlerts] = useState(() => persistedState?.priceAlerts || [])
+  const [notifications, setNotifications] = useState(() => persistedState?.notifications || [])
   const [alertNotifications, setAlertNotifications] = useState([])
   const reconnectTimerRef = useRef(null)
   const priceFrameRef = useRef(null)
@@ -137,6 +145,23 @@ export function TradingProvider({ children }) {
   const remoteSyncReadyRef = useRef(false)
   const remoteSyncTimerRef = useRef(null)
   const seenTriggeredAlertsRef = useRef(new Map())
+  const pushNotification = useCallback((payload) => {
+    const title = String(payload?.title || "").trim()
+    const message = String(payload?.message || "").trim()
+    if (!title || !message) return
+
+    setNotifications((prev) => [
+      {
+        id: `NTF-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        title,
+        message,
+        tone: payload?.tone || "info",
+        isRead: false,
+        createdAt: new Date().toISOString(),
+      },
+      ...prev,
+    ].slice(0, 30))
+  }, [])
 
   useEffect(() => {
     let isCancelled = false
@@ -159,6 +184,7 @@ export function TradingProvider({ children }) {
         setWalletTransactions(safeWalletTxns)
         setAppliedWalletRequestIds(normalized.appliedWalletRequestIds || [])
         setPriceAlerts(normalized.priceAlerts)
+        setNotifications(normalized.notifications || [])
         nextPositionIdRef.current = getNextPositionId(normalized.positions, normalized.closedPositions)
         nextTransactionIdRef.current = getNextTransactionNumber(safeWalletTxns)
         nextAlertIdRef.current = getNextAlertNumber(normalized.priceAlerts)
@@ -228,6 +254,7 @@ export function TradingProvider({ children }) {
       walletTransactions,
       appliedWalletRequestIds,
       priceAlerts,
+      notifications,
     }
     window.localStorage.setItem(TRADING_STORAGE_KEY, JSON.stringify(payload))
 
@@ -243,7 +270,7 @@ export function TradingProvider({ children }) {
     return () => {
       if (remoteSyncTimerRef.current) clearTimeout(remoteSyncTimerRef.current)
     }
-  }, [selectedPair, positions, closedPositions, demoBalance, walletTransactions, appliedWalletRequestIds, priceAlerts])
+  }, [selectedPair, positions, closedPositions, demoBalance, walletTransactions, appliedWalletRequestIds, priceAlerts, notifications])
 
   useEffect(() => {
     let socket
@@ -333,7 +360,7 @@ export function TradingProvider({ children }) {
       let changed = false
 
       const next = prev.map((alert) => {
-        if (!alert?.isActive || alert?.triggeredAt) return alert
+        if (!alert?.isActive) return alert
         const market = markets.find((item) => item.pair === alert.pair)
         if (!market) return alert
 
@@ -344,11 +371,30 @@ export function TradingProvider({ children }) {
         const isTriggered =
           alert.direction === "below" ? livePrice <= targetPrice : livePrice >= targetPrice
 
-        if (!isTriggered) return alert
+        if (!isTriggered) {
+          if (!alert.conditionMet) return alert
+          changed = true
+          return {
+            ...alert,
+            conditionMet: false,
+          }
+        }
+
+        if (alert.conditionMet) return alert
         changed = true
+
+        if (alert.mode === "recurring") {
+          return {
+            ...alert,
+            conditionMet: true,
+            triggeredAt: new Date().toISOString(),
+          }
+        }
+
         return {
           ...alert,
           isActive: false,
+          conditionMet: true,
           triggeredAt: new Date().toISOString(),
         }
       })
@@ -385,21 +431,40 @@ export function TradingProvider({ children }) {
     if (newNotifications.length === 0) return
 
     setAlertNotifications((prev) => [...newNotifications, ...prev].slice(0, 5))
+    setNotifications((prev) => [
+      ...newNotifications.map((item) => ({
+        id: item.id,
+        title: "Price Alert Triggered",
+        message: item.message,
+        tone: "warning",
+        isRead: false,
+        createdAt: item.createdAt,
+      })),
+      ...prev,
+    ].slice(0, 30))
 
     if (typeof window !== "undefined") {
       try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext
         if (!AudioCtx) return
         const audioCtx = new AudioCtx()
-        const oscillator = audioCtx.createOscillator()
-        const gainNode = audioCtx.createGain()
-        oscillator.type = "sine"
-        oscillator.frequency.value = 880
-        gainNode.gain.value = 0.04
-        oscillator.connect(gainNode)
-        gainNode.connect(audioCtx.destination)
-        oscillator.start()
-        oscillator.stop(audioCtx.currentTime + 0.15)
+        const playTone = (startTime, frequency, duration, volume) => {
+          const oscillator = audioCtx.createOscillator()
+          const gainNode = audioCtx.createGain()
+          oscillator.type = "sine"
+          oscillator.frequency.value = frequency
+          gainNode.gain.setValueAtTime(0.0001, startTime)
+          gainNode.gain.exponentialRampToValueAtTime(volume, startTime + 0.02)
+          gainNode.gain.exponentialRampToValueAtTime(0.0001, startTime + duration)
+          oscillator.connect(gainNode)
+          gainNode.connect(audioCtx.destination)
+          oscillator.start(startTime)
+          oscillator.stop(startTime + duration + 0.03)
+        }
+
+        const start = audioCtx.currentTime
+        playTone(start, 740, 0.12, 0.05)
+        playTone(start + 0.14, 1040, 0.18, 0.07)
       } catch {
         // ignore sound errors
       }
@@ -565,6 +630,12 @@ export function TradingProvider({ children }) {
             ? priceDiff * positionToClose.quantity
             : -priceDiff * positionToClose.quantity
 
+        pushNotification({
+          title: "Trade Closed",
+          message: `${positionToClose.symbol} ${positionToClose.type} closed via ${closeReason} at $${closePrice.toFixed(2)}.`,
+          tone: rawClosedPnl >= 0 ? "success" : "danger",
+        })
+
         setDemoBalance((balancePrev) => {
           // Keep demo cash non-negative: apply loss only up to available cash.
           const appliedPnl = Math.max(rawClosedPnl, -balancePrev)
@@ -607,7 +678,7 @@ export function TradingProvider({ children }) {
         closingPositionIdsRef.current.delete(positionId)
       }, 0)
     },
-    [getCurrentPrice]
+    [getCurrentPrice, pushNotification]
   )
 
   const updatePositionRisk = useCallback((positionId, payload) => {
@@ -719,6 +790,11 @@ export function TradingProvider({ children }) {
     const safeAmount = Number(amount)
     if (!Number.isFinite(safeAmount) || safeAmount <= 0) return
 
+    pushNotification({
+      title: "Funds Added",
+      message: `Demo balance credited by $${safeAmount.toFixed(2)}.`,
+      tone: "success",
+    })
     setDemoBalance((balancePrev) => balancePrev + safeAmount)
     setWalletTransactions((txnPrev) => {
       const txnId = formatTxnId(nextTransactionIdRef.current)
@@ -736,7 +812,7 @@ export function TradingProvider({ children }) {
         ...txnPrev,
       ]
     })
-  }, [])
+  }, [pushNotification])
 
   const withdrawDemoFunds = useCallback((amount = 500) => {
     const safeAmount = Number(amount)
@@ -752,6 +828,11 @@ export function TradingProvider({ children }) {
 
     if (!isWithdrawn) return false
 
+    pushNotification({
+      title: "Funds Withdrawn",
+      message: `Demo balance debited by $${safeAmount.toFixed(2)}.`,
+      tone: "warning",
+    })
     setWalletTransactions((txnPrev) => {
       const txnId = formatTxnId(nextTransactionIdRef.current)
       nextTransactionIdRef.current += 1
@@ -770,7 +851,7 @@ export function TradingProvider({ children }) {
     })
 
     return true
-  }, [])
+  }, [pushNotification])
 
   const resetDemoAccount = useCallback(() => {
     closingPositionIdsRef.current.clear()
@@ -787,6 +868,7 @@ export function TradingProvider({ children }) {
     const pair = String(payload?.pair || "").trim()
     const symbol = String(payload?.symbol || "").trim()
     const direction = payload?.direction === "below" ? "below" : "above"
+    const mode = payload?.mode === "recurring" ? "recurring" : "one-time"
     const targetPrice = Number(payload?.targetPrice)
     if (!pair || !symbol || !Number.isFinite(targetPrice) || targetPrice <= 0) {
       return { ok: false, error: "Invalid alert values." }
@@ -800,15 +882,22 @@ export function TradingProvider({ children }) {
         pair,
         symbol,
         direction,
+        mode,
         targetPrice,
         isActive: true,
         triggeredAt: null,
+        conditionMet: false,
         createdAt: new Date().toISOString(),
       },
       ...prev,
     ])
+    pushNotification({
+      title: "Alert Created",
+      message: `${symbol} will notify when price moves ${direction} ${formatAlertPrice(targetPrice)} (${mode}).`,
+      tone: "info",
+    })
     return { ok: true, error: null }
-  }, [])
+  }, [pushNotification])
 
   const removePriceAlert = useCallback((alertId) => {
     setPriceAlerts((prev) => prev.filter((item) => item.id !== alertId))
@@ -822,6 +911,7 @@ export function TradingProvider({ children }) {
               ...item,
               isActive: true,
               triggeredAt: null,
+              conditionMet: false,
             }
           : item
       )
@@ -831,6 +921,19 @@ export function TradingProvider({ children }) {
   const dismissAlertNotification = useCallback((notificationId) => {
     setAlertNotifications((prev) => prev.filter((item) => item.id !== notificationId))
   }, [])
+
+  const dismissNotification = useCallback((notificationId) => {
+    setNotifications((prev) => prev.filter((item) => item.id !== notificationId))
+  }, [])
+
+  const markAllNotificationsRead = useCallback(() => {
+    setNotifications((prev) => prev.map((item) => ({ ...item, isRead: true })))
+  }, [])
+
+  const unreadNotificationsCount = useMemo(
+    () => notifications.filter((item) => !item.isRead).length,
+    [notifications]
+  )
 
   const value = useMemo(
     () => ({
@@ -858,6 +961,10 @@ export function TradingProvider({ children }) {
       createPriceAlert,
       removePriceAlert,
       reactivatePriceAlert,
+      notifications,
+      unreadNotificationsCount,
+      dismissNotification,
+      markAllNotificationsRead,
       alertNotifications,
       dismissAlertNotification,
       getCurrentPrice,
@@ -890,6 +997,10 @@ export function TradingProvider({ children }) {
       createPriceAlert,
       removePriceAlert,
       reactivatePriceAlert,
+      notifications,
+      unreadNotificationsCount,
+      dismissNotification,
+      markAllNotificationsRead,
       alertNotifications,
       dismissAlertNotification,
     ]

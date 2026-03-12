@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react"
 
+const DEMO_LEVERAGE = 5
+
 export default function OrderPanel({ symbol, price, freeMargin = 0, maxRiskPerTradeAmount = 0, onPlaceOrder }) {
   const [type, setType] = useState("BUY")
   const [quantity, setQuantity] = useState("")
@@ -7,13 +9,12 @@ export default function OrderPanel({ symbol, price, freeMargin = 0, maxRiskPerTr
   const [takeProfit, setTakeProfit] = useState("")
   const [error, setError] = useState("")
 
-  const estimatedPnl = useMemo(() => {
+  const requiredAmount = useMemo(() => {
     const qty = Number(quantity)
     if (!Number.isFinite(qty) || qty <= 0) return "0.00"
 
-    const move = price * qty * 0.02
-    return (type === "BUY" ? move : -move).toFixed(2)
-  }, [price, quantity, type])
+    return ((price * qty) / DEMO_LEVERAGE).toFixed(2)
+  }, [price, quantity])
 
   const maxRiskAmount = useMemo(() => Math.max(0, Number(maxRiskPerTradeAmount)), [maxRiskPerTradeAmount])
   const maxQtyByRisk = useMemo(() => {
@@ -180,10 +181,8 @@ export default function OrderPanel({ symbol, price, freeMargin = 0, maxRiskPerTr
       ) : null}
 
       <div className="mb-4 flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm">
-        <span className="text-slate-300">Estimated P&L</span>
-        <span className={`font-semibold ${Number(estimatedPnl) >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-          ${estimatedPnl}
-        </span>
+        <span className="text-slate-300">Required Amount</span>
+        <span className="font-semibold text-emerald-400">${requiredAmount}</span>
       </div>
 
       <button
