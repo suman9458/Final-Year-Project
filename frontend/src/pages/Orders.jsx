@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 import { useTrading } from "../context/TradingContext"
+import { uploadJournalAttachment } from "../services/tradingService"
 
 function formatPrice(value) {
   const numeric = Number(value)
@@ -15,13 +16,39 @@ function escapeCsvCell(value) {
   return text
 }
 
+function truncateText(value, maxLength = 44) {
+  const text = String(value ?? "").trim()
+  if (text.length <= maxLength) return text
+  return `${text.slice(0, maxLength - 1)}...`
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ""))
+    reader.onerror = () => reject(new Error("Unable to read selected file."))
+    reader.readAsDataURL(file)
+  })
+}
+
+const MAX_JOURNAL_ATTACHMENTS = 3
+const MAX_ATTACHMENT_SIZE_BYTES = 1.5 * 1024 * 1024
+
 export default function Orders() {
-  const { positions, closedPositions, getCurrentPrice, calculateRunningPnl } = useTrading()
+  const { positions, closedPositions, getCurrentPrice, calculateRunningPnl, tradeJournal, saveTradeJournalNote } =
+    useTrading()
+
   const [statusFilter, setStatusFilter] = useState("ALL")
   const [sideFilter, setSideFilter] = useState("ALL")
   const [symbolQuery, setSymbolQuery] = useState("")
   const [fromDate, setFromDate] = useState("")
   const [toDate, setToDate] = useState("")
+  const [editingTrade, setEditingTrade] = useState(null)
+  const [journalDraft, setJournalDraft] = useState("")
+  const [journalMessage, setJournalMessage] = useState("")
+  const [journalAttachments, setJournalAttachments] = useState([])
+  const [isAttachmentLoading, setIsAttachmentLoading] = useState(false)
+  const [previewAttachment, setPreviewAttachment] = useState(null)
 
   const uniqueClosedTrades = useMemo(() => {
     const seenTradeIds = new Set()
@@ -44,38 +71,44 @@ export default function Orders() {
       positions
         .filter((position) => !closedTradeIds.has(String(position.id)))
         .map((position) => {
-        const currentPrice = getCurrentPrice(position.symbol)
-        const pnl = calculateRunningPnl(position)
-        const operationSide = position.type === "BUY" ? "BUY" : "SELL"
+          const currentPrice = getCurrentPrice(position.symbol)
+          const pnl = calculateRunningPnl(position)
+          const operationSide = position.type === "BUY" ? "BUY" : "SELL"
+          const journalEntry = tradeJournal[String(position.id)] || {}
 
-        return {
-          rowKey: `open-${position.id}`,
-          orderId: `ORD-${String(position.id).padStart(4, "0")}`,
-          pair: position.symbol,
-          side: operationSide,
-          operationType: operationSide === "BUY" ? "Buy" : "Sell",
-          executionFlow: "Open",
-          quantity: position.quantity,
-          entry: position.entryPrice,
-          stopLoss: position.stopLoss,
-          takeProfit: position.takeProfit,
-          current: currentPrice,
-          pnl,
-          closeReason: "-",
-          status: "Open",
-          createdAt: position.createdAt,
-        }
-      }),
-    [calculateRunningPnl, closedTradeIds, getCurrentPrice, positions]
+          return {
+            rowKey: `open-${position.id}`,
+            tradeId: String(position.id),
+            orderId: `ORD-${String(position.id).padStart(4, "0")}`,
+            pair: position.symbol,
+            side: operationSide,
+            operationType: operationSide === "BUY" ? "Buy" : "Sell",
+            executionFlow: "Open",
+            quantity: position.quantity,
+            entry: position.entryPrice,
+            stopLoss: position.stopLoss,
+            takeProfit: position.takeProfit,
+            current: currentPrice,
+            pnl,
+            closeReason: "-",
+            status: "Open",
+            createdAt: position.createdAt,
+            journalNote: journalEntry.note || "",
+            journalAttachments: journalEntry.attachments || [],
+          }
+        }),
+    [calculateRunningPnl, closedTradeIds, getCurrentPrice, positions, tradeJournal]
   )
 
   const closedRows = useMemo(
     () =>
       uniqueClosedTrades.map((position) => {
         const originalSide = position.type === "BUY" ? "BUY" : "SELL"
+        const journalEntry = tradeJournal[String(position.id)] || {}
 
         return {
           rowKey: `closed-${position.id}`,
+          tradeId: String(position.id),
           orderId: `ORD-${String(position.id).padStart(4, "0")}`,
           pair: position.symbol,
           side: originalSide,
@@ -90,9 +123,11 @@ export default function Orders() {
           closeReason: position.closeReason || "Manual Close",
           status: "Closed",
           createdAt: position.closedAt,
+          journalNote: journalEntry.note || "",
+          journalAttachments: journalEntry.attachments || [],
         }
       }),
-    [uniqueClosedTrades]
+    [tradeJournal, uniqueClosedTrades]
   )
 
   const rows = useMemo(() => [...openRows, ...closedRows], [closedRows, openRows])
@@ -151,6 +186,8 @@ export default function Orders() {
       "PnL",
       "Status",
       "Close Reason",
+      "Journal Note",
+      "Attachment Count",
       "Timestamp",
     ]
 
@@ -170,6 +207,8 @@ export default function Orders() {
         row.pnl,
         row.status,
         row.closeReason,
+        row.journalNote,
+        row.journalAttachments.length,
         row.createdAt ?? "",
       ].map(escapeCsvCell)
       lines.push(cells.join(","))
@@ -184,6 +223,112 @@ export default function Orders() {
     link.click()
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
+  }
+
+  const handleOpenJournal = (row) => {
+    setEditingTrade({
+      tradeId: row.tradeId,
+      orderId: row.orderId,
+      pair: row.pair,
+      status: row.status,
+    })
+    setJournalDraft(row.journalNote || "")
+    setJournalAttachments(row.journalAttachments || [])
+    setJournalMessage("")
+  }
+
+  const closeJournalModal = () => {
+    setEditingTrade(null)
+    setJournalDraft("")
+    setJournalAttachments([])
+    setJournalMessage("")
+  }
+
+  const handleSaveJournal = () => {
+    if (!editingTrade) return
+
+    const result = saveTradeJournalNote(editingTrade.tradeId, {
+      note: journalDraft,
+      attachments: journalAttachments,
+    })
+    if (!result?.ok) {
+      setJournalMessage(result?.error || "Unable to save journal note.")
+      return
+    }
+
+    setJournalMessage("Journal note saved.")
+    setTimeout(() => {
+      closeJournalModal()
+    }, 500)
+  }
+
+  const handleJournalFiles = async (event) => {
+    const files = Array.from(event.target.files || [])
+    event.target.value = ""
+    if (files.length === 0) return
+
+    if (journalAttachments.length >= MAX_JOURNAL_ATTACHMENTS) {
+      setJournalMessage(`You can keep up to ${MAX_JOURNAL_ATTACHMENTS} screenshots per trade.`)
+      return
+    }
+
+    setIsAttachmentLoading(true)
+    try {
+      const remainingSlots = MAX_JOURNAL_ATTACHMENTS - journalAttachments.length
+      const nextFiles = files.slice(0, remainingSlots)
+      const prepared = []
+
+      for (const file of nextFiles) {
+        if (!String(file.type || "").startsWith("image/")) {
+          setJournalMessage("Only image files are supported for journal attachments.")
+          continue
+        }
+        if (file.size > MAX_ATTACHMENT_SIZE_BYTES) {
+          setJournalMessage("Each screenshot must be 1.5 MB or smaller.")
+          continue
+        }
+
+        const dataUrl = await readFileAsDataUrl(file)
+
+        try {
+          const uploadedAttachment = await uploadJournalAttachment({
+            fileName: file.name,
+            contentType: file.type || "image/png",
+            dataUrl,
+          })
+          if (uploadedAttachment) {
+            prepared.push(uploadedAttachment)
+            continue
+          }
+        } catch (error) {
+          if (error.code !== "LOCAL_SESSION") {
+            setJournalMessage("Backend upload unavailable. Keeping screenshot in local journal mode.")
+          }
+        }
+
+        prepared.push({
+          id: `ATT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          name: file.name,
+          type: file.type || "image/*",
+          dataUrl,
+        })
+      }
+
+      if (prepared.length > 0) {
+        setJournalAttachments((prev) => [...prev, ...prepared].slice(0, MAX_JOURNAL_ATTACHMENTS))
+        if (!journalMessage || journalMessage.includes("saved")) {
+          setJournalMessage("")
+        }
+      }
+    } catch (error) {
+      setJournalMessage(error.message || "Unable to add selected screenshot.")
+    } finally {
+      setIsAttachmentLoading(false)
+    }
+  }
+
+  const removeJournalAttachment = (attachmentId) => {
+    setJournalAttachments((prev) => prev.filter((item) => item.id !== attachmentId))
   }
 
   return (
@@ -332,6 +477,7 @@ export default function Orders() {
                   <th className="px-2 py-2">Current/Close</th>
                   <th className="px-2 py-2">P&L</th>
                   <th className="px-2 py-2">Reason</th>
+                  <th className="px-2 py-2">Journal</th>
                   <th className="px-2 py-2">Status</th>
                 </tr>
               </thead>
@@ -353,6 +499,19 @@ export default function Orders() {
                     </td>
                     <td className="px-2 py-2 text-slate-300">{row.closeReason}</td>
                     <td className="px-2 py-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenJournal(row)}
+                        className="max-w-40 rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-left text-xs text-slate-300 hover:bg-slate-800/80"
+                      >
+                        {row.journalNote
+                          ? truncateText(row.journalNote)
+                          : row.journalAttachments.length > 0
+                            ? `${row.journalAttachments.length} screenshot(s)`
+                            : "Add note"}
+                      </button>
+                    </td>
+                    <td className="px-2 py-2">
                       <span
                         className={`rounded-full px-2 py-1 text-xs ${
                           row.status === "Open" ? "bg-sky-500/20 text-sky-300" : "bg-slate-500/20 text-slate-300"
@@ -368,6 +527,143 @@ export default function Orders() {
           </div>
         )}
       </section>
+
+      {editingTrade ? (
+        <div className="fixed inset-0 z-120 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+          <div className="app-surface soft-in w-full max-w-lg rounded-xl p-5 shadow-[0_18px_60px_rgba(2,6,23,0.35)]">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Trade Journal</p>
+                <h2 className="mt-1 text-lg font-semibold text-white">{editingTrade.orderId}</h2>
+                <p className="text-sm text-slate-300">
+                  {editingTrade.pair} | {editingTrade.status}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeJournalModal}
+                className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-300 hover:bg-slate-700"
+              >
+                Close
+              </button>
+            </div>
+
+            <textarea
+              value={journalDraft}
+              onChange={(event) => {
+                setJournalDraft(event.target.value)
+                if (journalMessage) setJournalMessage("")
+              }}
+              rows={6}
+              placeholder="Write your trade setup, reason, emotion, or lesson here..."
+              className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-400 focus:border-sky-500"
+            />
+            <p className="mt-2 text-xs text-slate-400">
+              Saving an empty note with no attachments will remove the journal entry for this trade.
+            </p>
+
+            <div className="mt-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-100">Screenshots / Attachments</p>
+                  <p className="text-xs text-slate-400">
+                    Up to {MAX_JOURNAL_ATTACHMENTS} images, 1.5 MB each.
+                  </p>
+                </div>
+                <label className="cursor-pointer rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700">
+                  {isAttachmentLoading ? "Adding..." : "Add Screenshot"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleJournalFiles}
+                    className="hidden"
+                    disabled={isAttachmentLoading || journalAttachments.length >= MAX_JOURNAL_ATTACHMENTS}
+                  />
+                </label>
+              </div>
+
+              {journalAttachments.length > 0 ? (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {journalAttachments.map((attachment) => (
+                    <div key={attachment.id} className="theme-soft-block rounded-lg p-2">
+                      <img
+                        src={attachment.dataUrl}
+                        alt={attachment.name}
+                        className="h-32 w-full cursor-zoom-in rounded-md object-cover"
+                        onClick={() => setPreviewAttachment(attachment)}
+                      />
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <p className="truncate text-xs text-slate-300">{attachment.name}</p>
+                        <button
+                          type="button"
+                          onClick={() => removeJournalAttachment(attachment.id)}
+                          className="rounded-md bg-rose-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-rose-500"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="theme-soft-block rounded-lg px-3 py-4 text-sm text-slate-400">
+                  No screenshots attached yet.
+                </div>
+              )}
+            </div>
+
+            {journalMessage ? <p className="mt-3 text-sm text-emerald-400">{journalMessage}</p> : null}
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeJournalModal}
+                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 hover:bg-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveJournal}
+                className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500"
+              >
+                Save Note
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {previewAttachment ? (
+        <div className="fixed inset-0 z-130 flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm" onClick={() => setPreviewAttachment(null)}>
+          <div
+            className="relative max-h-[92vh] w-full max-w-5xl rounded-xl bg-slate-950/95 p-3"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-100">{previewAttachment.name}</p>
+                <p className="text-xs text-slate-400">Full-screen journal preview</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewAttachment(null)}
+                className="rounded-md bg-slate-800 px-3 py-1 text-xs text-slate-200 hover:bg-slate-700"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex max-h-[80vh] items-center justify-center overflow-auto rounded-lg bg-slate-900/80 p-2">
+              <img
+                src={previewAttachment.dataUrl}
+                alt={previewAttachment.name}
+                className="max-h-[78vh] w-auto max-w-full rounded-lg object-contain"
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

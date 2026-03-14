@@ -8,6 +8,7 @@ export default function Sidebar({ isOpen, onClose }) {
   const navItems = [
     { label: "Dashboard", to: "/dashboard" },
     { label: "Trading", to: "/trading" },
+    { label: "Analytics", to: "/analytics" },
     { label: "Alerts", to: "/alerts" },
     { label: "Wallet", to: "/wallet" },
     { label: "Orders", to: "/orders" },

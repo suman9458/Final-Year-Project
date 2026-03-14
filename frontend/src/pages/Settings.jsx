@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
+import { useTrading } from "../context/TradingContext"
 import { getCurrentSessionTokenId } from "../services/authService"
 
 function getPasswordStrength(password) {
@@ -20,6 +21,7 @@ function getPasswordStrength(password) {
 export default function Settings() {
   const navigate = useNavigate()
   const { user, updateProfile, changePassword, logoutAllSessions, fetchMySessions, revokeMySession, logout } = useAuth()
+  const { notificationPreferences, updateNotificationPreferences } = useTrading()
   const [name, setName] = useState("")
   const [country, setCountry] = useState("")
   const [proofOfAddress, setProofOfAddress] = useState("")
@@ -42,6 +44,7 @@ export default function Settings() {
   const [isSessionsLoading, setIsSessionsLoading] = useState(false)
   const [sessionsError, setSessionsError] = useState("")
   const [revokingSessionId, setRevokingSessionId] = useState("")
+  const [notificationSuccess, setNotificationSuccess] = useState("")
 
   useEffect(() => {
     setName(user?.name || "")
@@ -166,6 +169,11 @@ export default function Settings() {
     } finally {
       setRevokingSessionId("")
     }
+  }
+
+  const handleNotificationPreferenceChange = (patch) => {
+    updateNotificationPreferences(patch)
+    setNotificationSuccess("Notification preferences updated.")
   }
 
   return (
@@ -365,6 +373,61 @@ export default function Settings() {
         </button>
         {sessionActionError ? <p className="mt-3 text-sm text-rose-400">{sessionActionError}</p> : null}
         {sessionActionSuccess ? <p className="mt-3 text-sm text-emerald-400">{sessionActionSuccess}</p> : null}
+      </section>
+
+      <section className="app-surface soft-in rounded-xl p-5">
+        <h2 className="mb-2 text-lg font-semibold text-white">Notification Settings</h2>
+        <p className="mb-4 text-sm text-slate-300">
+          Control whether alert popups and notification sounds are shown while you trade.
+        </p>
+
+        <div className="space-y-3">
+          <div className="theme-soft-block flex items-center justify-between rounded-lg px-4 py-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-100">Alert Sound</p>
+              <p className="text-xs text-slate-400">Play the notification sound when a price alert triggers.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                handleNotificationPreferenceChange({
+                  soundEnabled: !notificationPreferences.soundEnabled,
+                })
+              }
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                notificationPreferences.soundEnabled
+                  ? "bg-emerald-600 text-white hover:bg-emerald-500"
+                  : "bg-slate-700 text-slate-200 hover:bg-slate-600"
+              }`}
+            >
+              {notificationPreferences.soundEnabled ? "Enabled" : "Disabled"}
+            </button>
+          </div>
+
+          <div className="theme-soft-block flex items-center justify-between rounded-lg px-4 py-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-100">Popup Alerts</p>
+              <p className="text-xs text-slate-400">Show floating popup toasts when alerts are triggered.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                handleNotificationPreferenceChange({
+                  popupEnabled: !notificationPreferences.popupEnabled,
+                })
+              }
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                notificationPreferences.popupEnabled
+                  ? "bg-emerald-600 text-white hover:bg-emerald-500"
+                  : "bg-slate-700 text-slate-200 hover:bg-slate-600"
+              }`}
+            >
+              {notificationPreferences.popupEnabled ? "Enabled" : "Disabled"}
+            </button>
+          </div>
+        </div>
+
+        {notificationSuccess ? <p className="mt-3 text-sm text-emerald-400">{notificationSuccess}</p> : null}
       </section>
 
       <section className="app-surface soft-in rounded-xl p-5">

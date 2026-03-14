@@ -12,6 +12,7 @@ import Orders from "./pages/Orders"
 import Settings from "./pages/Settings"
 import Alerts from "./pages/Alerts"
 import Admin from "./pages/Admin"
+import Analytics from "./pages/Analytics"
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="/trading" element={<Trading />} />
           <Route path="/wallet" element={<Wallet />} />
           <Route path="/orders" element={<Orders />} />
+          <Route path="/analytics" element={<Analytics />} />
           <Route path="/alerts" element={<Alerts />} />
           <Route path="/settings" element={<Settings />} />
           <Route element={<AdminRoute />}>

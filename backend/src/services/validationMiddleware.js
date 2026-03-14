@@ -247,6 +247,35 @@ function validateWalletRequestCreate(req, res, next) {
   return next()
 }
 
+function validateJournalAttachmentUpload(req, res, next) {
+  const fileName = String(req.body?.fileName || "").trim()
+  const contentType = String(req.body?.contentType || "")
+    .trim()
+    .toLowerCase()
+  const dataUrl = String(req.body?.dataUrl || "").trim()
+
+  if (!fileName || !contentType || !dataUrl) {
+    return next(createHttpError(400, "fileName, contentType, and dataUrl are required.", "VALIDATION_ERROR"))
+  }
+  if (fileName.length > 180) {
+    return next(createHttpError(400, "fileName is too long.", "VALIDATION_ERROR"))
+  }
+  if (!["image/png", "image/jpeg", "image/jpg", "image/webp"].includes(contentType)) {
+    return next(createHttpError(400, "Unsupported image type.", "VALIDATION_ERROR"))
+  }
+  if (!dataUrl.startsWith(`data:${contentType};base64,`)) {
+    return next(createHttpError(400, "Invalid image data format.", "VALIDATION_ERROR"))
+  }
+  if (dataUrl.length > 2_900_000) {
+    return next(createHttpError(413, "Image payload is too large.", "PAYLOAD_TOO_LARGE"))
+  }
+
+  req.body.fileName = fileName
+  req.body.contentType = contentType
+  req.body.dataUrl = dataUrl
+  return next()
+}
+
 function validateWalletRequestIdParam(req, res, next) {
   const requestId = String(req.params?.requestId || "").trim()
   if (!/^[0-9a-fA-F-]{36}$/.test(requestId)) {
@@ -286,6 +315,7 @@ module.exports = {
   validateAdminUserStatusUpdate,
   validateAdminUserKycUpdate,
   validateWalletRequestCreate,
+  validateJournalAttachmentUpload,
   validateWalletRequestIdParam,
   validateAdminWalletRequestStatusUpdate,
   validateTradingStatePayload,

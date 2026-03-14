@@ -73,6 +73,8 @@ function normalizeTradingState(rawState) {
         }))
       : [],
     notifications: Array.isArray(parsed?.notifications) ? parsed.notifications : [],
+    notificationPreferences: normalizeNotificationPreferences(parsed?.notificationPreferences),
+    tradeJournal: normalizeTradeJournal(parsed?.tradeJournal),
   }
 }
 
@@ -112,6 +114,53 @@ function formatAlertPrice(value) {
   return numeric.toLocaleString(undefined, { maximumFractionDigits: 6 })
 }
 
+function normalizeNotificationPreferences(rawPreferences) {
+  const source = rawPreferences && typeof rawPreferences === "object" ? rawPreferences : {}
+  return {
+    soundEnabled: source.soundEnabled !== false,
+    popupEnabled: source.popupEnabled !== false,
+  }
+}
+
+function normalizeTradeJournal(rawJournal) {
+  const source = rawJournal && typeof rawJournal === "object" ? rawJournal : {}
+  return Object.fromEntries(
+    Object.entries(source).map(([tradeId, entry]) => {
+      if (typeof entry === "string") {
+        return [
+          tradeId,
+          {
+            note: entry,
+            attachments: [],
+            updatedAt: null,
+          },
+        ]
+      }
+
+      const rawEntry = entry && typeof entry === "object" ? entry : {}
+      const attachments = Array.isArray(rawEntry.attachments)
+        ? rawEntry.attachments.filter(
+            (item) =>
+              item &&
+              typeof item === "object" &&
+              typeof item.id === "string" &&
+              typeof item.name === "string" &&
+              typeof item.dataUrl === "string"
+          )
+        : []
+
+      return [
+        tradeId,
+        {
+          note: String(rawEntry.note || ""),
+          attachments,
+          updatedAt: rawEntry.updatedAt || null,
+        },
+      ]
+    })
+  )
+}
+
 export function TradingProvider({ children }) {
   const persistedStateRef = useRef(readPersistedTradingState())
   const persistedState = persistedStateRef.current
@@ -133,6 +182,10 @@ export function TradingProvider({ children }) {
   )
   const [priceAlerts, setPriceAlerts] = useState(() => persistedState?.priceAlerts || [])
   const [notifications, setNotifications] = useState(() => persistedState?.notifications || [])
+  const [notificationPreferences, setNotificationPreferences] = useState(() =>
+    normalizeNotificationPreferences(persistedState?.notificationPreferences)
+  )
+  const [tradeJournal, setTradeJournal] = useState(() => normalizeTradeJournal(persistedState?.tradeJournal))
   const [alertNotifications, setAlertNotifications] = useState([])
   const reconnectTimerRef = useRef(null)
   const priceFrameRef = useRef(null)
@@ -185,6 +238,8 @@ export function TradingProvider({ children }) {
         setAppliedWalletRequestIds(normalized.appliedWalletRequestIds || [])
         setPriceAlerts(normalized.priceAlerts)
         setNotifications(normalized.notifications || [])
+        setNotificationPreferences(normalizeNotificationPreferences(normalized.notificationPreferences))
+        setTradeJournal(normalizeTradeJournal(normalized.tradeJournal))
         nextPositionIdRef.current = getNextPositionId(normalized.positions, normalized.closedPositions)
         nextTransactionIdRef.current = getNextTransactionNumber(safeWalletTxns)
         nextAlertIdRef.current = getNextAlertNumber(normalized.priceAlerts)
@@ -255,6 +310,8 @@ export function TradingProvider({ children }) {
       appliedWalletRequestIds,
       priceAlerts,
       notifications,
+      notificationPreferences,
+      tradeJournal,
     }
     window.localStorage.setItem(TRADING_STORAGE_KEY, JSON.stringify(payload))
 
@@ -270,7 +327,18 @@ export function TradingProvider({ children }) {
     return () => {
       if (remoteSyncTimerRef.current) clearTimeout(remoteSyncTimerRef.current)
     }
-  }, [selectedPair, positions, closedPositions, demoBalance, walletTransactions, appliedWalletRequestIds, priceAlerts, notifications])
+  }, [
+    selectedPair,
+    positions,
+    closedPositions,
+    demoBalance,
+    walletTransactions,
+    appliedWalletRequestIds,
+    priceAlerts,
+    notifications,
+    notificationPreferences,
+    tradeJournal,
+  ])
 
   useEffect(() => {
     let socket
@@ -430,7 +498,9 @@ export function TradingProvider({ children }) {
     seenTriggeredAlertsRef.current = nextSeen
     if (newNotifications.length === 0) return
 
-    setAlertNotifications((prev) => [...newNotifications, ...prev].slice(0, 5))
+    if (notificationPreferences.popupEnabled) {
+      setAlertNotifications((prev) => [...newNotifications, ...prev].slice(0, 5))
+    }
     setNotifications((prev) => [
       ...newNotifications.map((item) => ({
         id: item.id,
@@ -443,7 +513,7 @@ export function TradingProvider({ children }) {
       ...prev,
     ].slice(0, 30))
 
-    if (typeof window !== "undefined") {
+    if (notificationPreferences.soundEnabled && typeof window !== "undefined") {
       try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext
         if (!AudioCtx) return
@@ -469,7 +539,7 @@ export function TradingProvider({ children }) {
         // ignore sound errors
       }
     }
-  }, [priceAlerts])
+  }, [notificationPreferences.popupEnabled, notificationPreferences.soundEnabled, priceAlerts])
 
   useEffect(() => {
     if (alertNotifications.length === 0) return undefined
@@ -930,6 +1000,51 @@ export function TradingProvider({ children }) {
     setNotifications((prev) => prev.map((item) => ({ ...item, isRead: true })))
   }, [])
 
+  const updateNotificationPreferences = useCallback((patch) => {
+    setNotificationPreferences((prev) => ({
+      ...prev,
+      ...patch,
+    }))
+  }, [])
+
+  const saveTradeJournalNote = useCallback((tradeId, payload) => {
+    const normalizedTradeId = String(tradeId || "").trim()
+    if (!normalizedTradeId) return { ok: false, error: "Invalid trade." }
+
+    const normalizedPayload = payload && typeof payload === "object" ? payload : { note: payload }
+    const normalizedNote = String(normalizedPayload.note || "").trim()
+    const normalizedAttachments = Array.isArray(normalizedPayload.attachments)
+      ? normalizedPayload.attachments.filter(
+          (item) =>
+            item &&
+            typeof item === "object" &&
+            typeof item.id === "string" &&
+            typeof item.name === "string" &&
+            typeof item.dataUrl === "string"
+        )
+      : []
+
+    setTradeJournal((prev) => {
+      if (!normalizedNote && normalizedAttachments.length === 0) {
+        if (!(normalizedTradeId in prev)) return prev
+        const next = { ...prev }
+        delete next[normalizedTradeId]
+        return next
+      }
+
+      return {
+        ...prev,
+        [normalizedTradeId]: {
+          note: normalizedNote,
+          attachments: normalizedAttachments,
+          updatedAt: new Date().toISOString(),
+        },
+      }
+    })
+
+    return { ok: true, error: null }
+  }, [])
+
   const unreadNotificationsCount = useMemo(
     () => notifications.filter((item) => !item.isRead).length,
     [notifications]
@@ -962,6 +1077,10 @@ export function TradingProvider({ children }) {
       removePriceAlert,
       reactivatePriceAlert,
       notifications,
+      notificationPreferences,
+      tradeJournal,
+      saveTradeJournalNote,
+      updateNotificationPreferences,
       unreadNotificationsCount,
       dismissNotification,
       markAllNotificationsRead,
@@ -998,6 +1117,10 @@ export function TradingProvider({ children }) {
       removePriceAlert,
       reactivatePriceAlert,
       notifications,
+      notificationPreferences,
+      tradeJournal,
+      saveTradeJournalNote,
+      updateNotificationPreferences,
       unreadNotificationsCount,
       dismissNotification,
       markAllNotificationsRead,

@@ -1,5 +1,6 @@
 const { getTradingStateByUserId, upsertTradingState } = require("../models/tradingStateModel")
 const walletService = require("../services/walletService")
+const { saveJournalAttachment } = require("../services/journalAttachmentService")
 
 function createHttpError(status, message) {
   const error = new Error(message)
@@ -77,9 +78,40 @@ async function createWalletRequest(req, res, next) {
   }
 }
 
+async function uploadJournalAttachment(req, res, next) {
+  try {
+    const userId = req.user?.id
+    if (!userId) {
+      throw createHttpError(401, "Unauthorized.")
+    }
+
+    const savedAttachment = await saveJournalAttachment({
+      userId,
+      fileName: req.body?.fileName,
+      contentType: req.body?.contentType,
+      dataUrl: req.body?.dataUrl,
+    })
+
+    const publicBaseUrl =
+      process.env.PUBLIC_BACKEND_URL ||
+      `${req.protocol}://${req.get("host")}`
+    const attachment = {
+      ...savedAttachment,
+      dataUrl: String(savedAttachment.path || "").startsWith("http")
+        ? savedAttachment.path
+        : `${publicBaseUrl}${savedAttachment.path}`,
+    }
+
+    res.status(201).json({ attachment })
+  } catch (error) {
+    next(error)
+  }
+}
+
 module.exports = {
   getState,
   saveState,
   listMyWalletRequests,
   createWalletRequest,
+  uploadJournalAttachment,
 }

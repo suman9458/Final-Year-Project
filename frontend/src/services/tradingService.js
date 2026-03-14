@@ -74,3 +74,11 @@ export async function createWalletRequest(payload) {
   })
   return response?.request || null
 }
+
+export async function uploadJournalAttachment(payload) {
+  const response = await request("/trading/journal-attachments", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
+  return response?.attachment || null
+}
